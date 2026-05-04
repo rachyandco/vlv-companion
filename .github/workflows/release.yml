@@ -1,0 +1,129 @@
+name: Release APK
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Default everything to read-only; opt in per-job below. (GHA only supports
+# workflow- and job-scoped permissions — there's no step-scope.) Keep the
+# build job read-only so the keystore secrets never co-exist with a
+# write-scoped GITHUB_TOKEN.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: ""
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;27.1.12297006"
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Expo prebuild (regenerate android/)
+        run: pnpm prebuild --no-install
+
+      - name: Decode release keystore
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          # The workflow only runs on tag pushes (see `on:` above) and the
+          # resulting APK is published to GitHub Releases. Refuse to ship a
+          # debug-signed artifact under a release tag — fail loudly so a
+          # missing secret can't silently produce an unsigned-for-prod build.
+          if [ -z "$RELEASE_KEYSTORE_BASE64" ] \
+             || [ -z "$RELEASE_STORE_PASSWORD" ] \
+             || [ -z "$RELEASE_KEY_ALIAS" ] \
+             || [ -z "$RELEASE_KEY_PASSWORD" ]; then
+            echo "::error::Release signing secrets are missing. Set RELEASE_KEYSTORE_BASE64, RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD in repo Secrets before tagging a release."
+            exit 1
+          fi
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
+
+      - name: Build release APK
+        working-directory: android
+        # Pass the keystore secrets only to this step's gradle invocation.
+        # Avoids broadcasting them via $GITHUB_ENV to every subsequent step.
+        env:
+          ORG_GRADLE_PROJECT_VOLVO_RELEASE_STORE_FILE: release.keystore
+          ORG_GRADLE_PROJECT_VOLVO_RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_VOLVO_RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_VOLVO_RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Wipe keystore
+        if: always()
+        # Defense-in-depth: ephemeral runners are wiped, but no reason for the
+        # decoded keystore to outlive the build step it was needed for.
+        run: rm -f android/app/release.keystore
+
+      - name: Rename APK
+        run: |
+          mv android/app/build/outputs/apk/release/app-release.apk \
+             "vlv-companion-${GITHUB_REF_NAME}.apk"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: vlv-companion-${{ github.ref_name }}
+          path: vlv-companion-*.apk
+
+  # Splitting the build (read-only) and release (contents:write) phases keeps
+  # the GITHUB_TOKEN scope as narrow as possible: keystore secrets only exist
+  # in the build job, write capability only exists in the release job.
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: vlv-companion-${{ github.ref_name }}
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: vlv-companion-*.apk
+          generate_release_notes: true

@@ -1,0 +1,15 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      Debug overlay: route cleartext through a localhost-only allowlist instead
+      of the Expo-default blanket usesCleartextTraffic="true". Production
+      builds inherit the main manifest, which has neither attribute set →
+      cleartext disallowed by Android default.
+    -->
+    <application
+        android:networkSecurityConfig="@xml/network_security_config"
+        tools:targetApi="28"
+        tools:ignore="GoogleAppIndexingWarning"
+        tools:replace="android:networkSecurityConfig" />
+</manifest>

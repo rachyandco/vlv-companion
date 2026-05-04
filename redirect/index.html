@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <!--
+      Defense-in-depth CSP. The bridge does no network I/O — it only reads
+      query params and rewrites window.location to a custom-scheme URL. So:
+      block every resource type and every form/frame target. 'unsafe-inline'
+      is needed because the page intentionally inlines its tiny script and
+      style block (host might be a static-only CDN with no nonce support).
+    -->
+    <meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'" />
+    <title>Vlv Companion — Redirecting…</title>
+    <meta name="robots" content="noindex,nofollow" />
+    <style>
+      :root { color-scheme: dark light; }
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+             background: #0b0c0f; color: #e8eaed; margin: 0;
+             min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+      main { max-width: 480px; text-align: center; }
+      h1 { margin: 0 0 12px; font-size: 22px; }
+      p { color: #9aa0a6; line-height: 1.5; margin: 8px 0; }
+      a.btn { display: inline-block; margin-top: 16px; padding: 12px 18px; border-radius: 10px;
+              background: rgba(64,128,255,0.18); border: 1px solid rgba(64,128,255,0.5);
+              color: #cfe0ff; text-decoration: none; font-weight: 600; }
+      code { font-family: ui-monospace, monospace; color: #cfe0ff; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Returning to Vlv Companion…</h1>
+      <p id="status">Redirecting to the app.</p>
+      <a id="open" class="btn" href="#">Open the app</a>
+      <p style="margin-top: 24px; font-size: 12px;">
+        This page is the HTTPS bridge for the OAuth callback because the Volvo developer
+        portal does not accept custom URI schemes. It receives the
+        <code>code</code> and <code>state</code> query parameters from Volvo and forwards
+        them via deep link to the installed app.
+      </p>
+    </main>
+    <script>
+      (function () {
+        // Whitelist only the OAuth-callback parameters defined by RFC 6749 §4.1.2
+        // and the OIDC scope echo. Anything else from the source URL is dropped
+        // so the bridge cannot be coaxed into smuggling extra params into the app.
+        var ALLOWED = ["code", "state", "error", "error_description", "scope"];
+        var src = new URLSearchParams(window.location.search || "");
+        var safe = new URLSearchParams();
+        ALLOWED.forEach(function (k) {
+          var v = src.get(k);
+          if (v !== null) safe.set(k, v);
+        });
+        var query = safe.toString();
+        var deepLink = "volvo-companion://oauth/callback" + (query ? "?" + query : "");
+        document.getElementById("open").href = deepLink;
+        // Auto-redirect immediately. If the app is installed it'll intercept the intent.
+        window.location.replace(deepLink);
+      })();
+    </script>
+  </body>
+</html>
