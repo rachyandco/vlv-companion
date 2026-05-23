@@ -72,7 +72,7 @@ const withoutUpdatesNoise: ConfigPlugin = (config) =>
 const config = {
   name: "Vlv Companion",
   slug: "vlv-companion",
-  version: "0.1.0",
+  version: "1.0.0",
   orientation: "portrait",
   // Intentionally NOT setting `scheme:` at the top level — Expo's config
   // plugin would auto-emit a broad `<data android:scheme="volvo-companion"/>`
