@@ -2,7 +2,7 @@
 
 **Status:** Draft — awaiting user review
 **Date:** 2026-05-23
-**Scope:** First-time submission of `app.volvocompanion` (v0.1.0) to the official
+**Scope:** First-time submission of `app.volvocompanion` (v1.0.0) to the official
 f-droid.org repository.
 
 ## 1. Goal
@@ -43,7 +43,7 @@ A prepared fallback exists in case reviewers object:
   Releases, the "VC" icon (it reads naturally for VCompanion).
 - **Mechanics:** held on a `fdroid-rename-fallback` branch (one commit, two
   files changed). If the reviewer asks for a rename, the branch is merged
-  to master, a new tag `v0.1.1` is cut, and the MR is amended to point at
+  to master, a new tag `v1.0.1` is cut, and the MR is amended to point at
   the new tag.
 
 ## 4. Build recipe
@@ -57,9 +57,9 @@ Proposed `Builds:` entry:
 
 ```yaml
 Builds:
-  - versionName: 0.1.0
+  - versionName: 1.0.0
     versionCode: 1
-    commit: v0.1.0
+    commit: v1.0.0
     sudo:
       - apt-get update
       - apt-get install -y npm
@@ -194,9 +194,9 @@ RepoType: git
 Repo: https://github.com/rachyandco/vlv-companion.git
 
 Builds:
-  - versionName: 0.1.0
+  - versionName: 1.0.0
     versionCode: 1
-    commit: v0.1.0
+    commit: v1.0.0
     sudo:
       - apt-get update
       - apt-get install -y npm
@@ -210,7 +210,7 @@ Builds:
 
 AutoUpdateMode: Version v%v
 UpdateCheckMode: Tags ^v
-CurrentVersion: 0.1.0
+CurrentVersion: 1.0.0
 CurrentVersionCode: 1
 ```
 
@@ -222,18 +222,18 @@ Open inputs to gather before the MR:
 
 All must pass locally before the MR is opened:
 
-1. **Public tag exists.** `git fetch origin --tags && git rev-parse v0.1.0`
+1. **Public tag exists.** `git fetch origin --tags && git rev-parse v1.0.0`
    resolves on `github.com/rachyandco/vlv-companion`.
 2. **License file present at repo root.** Already true (`LICENSE`,
    GPL-3.0-or-later).
 3. **Issue tracker reachable.** GitHub Issues is enabled on the public repo.
 4. **Local F-Droid build green.** Inside the `registry.gitlab.com/fdroid/fdroidserver`
-   container, run `fdroid build app.volvocompanion:0.1.0` (no `--on-server`;
+   container, run `fdroid build app.volvocompanion:1.0.0` (no `--on-server`;
    that flag is for the actual build-VM mode and isn't what you want for
    local verification). It must complete with a usable APK.
 5. **APK badging sanity check.**
    `aapt dump badging <built.apk>` shows exactly:
-   - `package: name='app.volvocompanion' versionCode='1' versionName='0.1.0'`
+   - `package: name='app.volvocompanion' versionCode='1' versionName='1.0.0'`
    - `uses-permission: name='android.permission.INTERNET'` and no others
      (no `ACCESS_*_LOCATION`, no `READ/WRITE_EXTERNAL_STORAGE`, no
      `BIND_GET_INSTALL_REFERRER_SERVICE`).
@@ -272,7 +272,7 @@ This work is "done" when:
 
 1. `metadata/app.volvocompanion.yml` + the en-US metadata bundle is on a
    branch in a fork of `fdroiddata`, the local `fdroid build` succeeds for
-   `app.volvocompanion:0.1.0`, and `aapt dump badging` passes the §8.5
+   `app.volvocompanion:1.0.0`, and `aapt dump badging` passes the §8.5
    checklist.
 2. An MR is opened against `fdroiddata:master` with a description that
    surfaces the trademark fair-use argument and the `NonFreeNet`
