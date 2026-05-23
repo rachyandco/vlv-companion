@@ -70,7 +70,7 @@ const withoutUpdatesNoise: ConfigPlugin = (config) =>
   });
 
 const config = {
-  name: "Vlv Companion",
+  name: "VCompanion",
   slug: "vlv-companion",
   version: "1.0.0",
   orientation: "portrait",
