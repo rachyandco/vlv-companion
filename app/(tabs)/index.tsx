@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 
+import { regionRestrictionHint } from "@/api/errors";
 import { useAuth } from "@/auth/AuthProvider";
 import { DEFAULT_SCOPES } from "@/auth/config";
 import { classifyQueryError } from "@/auth/sessionError";
@@ -40,6 +41,7 @@ export default function GarageScreen(): JSX.Element {
   // dead error — it needs a forced disconnect + reconnect. Transient/API errors
   // keep showing their message with pull-to-refresh.
   const errorKind = error ? classifyQueryError(error) : null;
+  const regionHint = error ? regionRestrictionHint(error) : null;
 
   // Force a clean disconnect, then route to the sign-in screen so the user can
   // reconnect. signOut() clears tokens + cached data and flips auth state to
@@ -109,7 +111,10 @@ export default function GarageScreen(): JSX.Element {
             </Pressable>
           </View>
         ) : (
-          <Text style={styles.error}>{error.message}</Text>
+          <View style={styles.errorBlock}>
+            <Text style={styles.error}>{error.message}</Text>
+            {regionHint ? <Text style={styles.empty}>{regionHint}</Text> : null}
+          </View>
         )
       ) : null}
       {!isLoading && !error && data?.data.length === 0 ? (
@@ -194,6 +199,7 @@ const styles = StyleSheet.create({
   title: { color: "#e8eaed", fontSize: 24, fontWeight: "700", marginBottom: 4 },
   empty: { color: "#bdc1c6" },
   error: { color: "#fbcaca" },
+  errorBlock: { gap: 8 },
   expired: {
     padding: 16,
     borderRadius: 12,

@@ -3,6 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { ChargingStation } from "@/api/chargingStations";
+import { regionRestrictionHint } from "@/api/errors";
 import { MapView, type MapViewHandle } from "@/components/MapView";
 import { useChargingStations } from "@/hooks/useChargingStations";
 import { useVehicleLocation } from "@/hooks/useVehicleLocation";
@@ -46,9 +47,11 @@ export default function LocationScreen(): JSX.Element {
   }
   const status = (error as { status?: number } | null)?.status;
   if (error && status !== 404) {
+    const hint = regionRestrictionHint(error);
     return (
       <View style={styles.center}>
         <Text style={styles.error}>{error.message}</Text>
+        {hint ? <Text style={styles.hint}>{hint}</Text> : null}
       </View>
     );
   }

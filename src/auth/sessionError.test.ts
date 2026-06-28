@@ -7,9 +7,16 @@ describe("classifyQueryError", () => {
     expect(classifyQueryError(new SessionExpiredError())).toBe("session");
   });
 
-  it("flags 401 / 403 responses as session failures", () => {
+  it("flags a 401 (expired/invalid token) as a session failure", () => {
     expect(classifyQueryError(Object.assign(new Error("HTTP 401"), { status: 401 }))).toBe("session");
-    expect(classifyQueryError(Object.assign(new Error("HTTP 403"), { status: 403 }))).toBe("session");
+  });
+
+  it("treats a 403 as a displayable api error, not a session failure", () => {
+    // A 403 is 'authenticated but not authorized' — a scope/permission/region
+    // restriction (e.g. Volvo's "Client not allowed to access Location API" or
+    // an out-of-market vehicle). Forcing a reconnect can't fix it and would
+    // pointlessly log the user out, so it must be shown, not treated as expiry.
+    expect(classifyQueryError(Object.assign(new Error("HTTP 403 — Client not allowed to access Location API"), { status: 403 }))).toBe("api");
   });
 
   it("flags OAuth refresh failures by message", () => {

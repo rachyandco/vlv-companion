@@ -44,7 +44,11 @@ export function classifyQueryError(error: unknown): QueryErrorKind {
   if (err instanceof SessionExpiredError) return "session";
 
   const status = typeof err.status === "number" ? err.status : undefined;
-  if (status === 401 || status === 403) return "session";
+  // Only 401 means the token is expired/invalid (reconnect fixes it). A 403 is
+  // 'authenticated but not authorized' — a scope/permission/region restriction
+  // (e.g. an out-of-market vehicle or the geo-gated Location API) that a
+  // reconnect can't resolve, so it falls through to "api" and is displayed.
+  if (status === 401) return "session";
 
   const message = typeof err.message === "string" ? err.message : "";
   if (/invalid[_ ]grant|refresh.?token|please sign in|not signed in/i.test(message)) {

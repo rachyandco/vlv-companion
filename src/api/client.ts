@@ -3,6 +3,7 @@ import ky, { HTTPError, type KyInstance } from "ky";
 import { API_BASE } from "@/auth/config";
 import { getRuntimeConfig } from "@/lib/runtimeConfig";
 
+import { readError } from "./errors";
 import { newTraceparent } from "./trace";
 
 type GetAccessToken = () => Promise<string>;
@@ -98,48 +99,5 @@ export function createApiClient({ getAccessToken, onUnauthorized }: ApiClientDep
   });
 }
 
-export class VolvoApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly code?: string,
-    readonly details?: unknown,
-  ) {
-    super(message);
-    this.name = "VolvoApiError";
-  }
-}
-
-export async function readError(response: Response): Promise<VolvoApiError> {
-  let bodyText = "";
-  try {
-    bodyText = await response.clone().text();
-  } catch {
-    // ignore
-  }
-  let payload: unknown;
-  try {
-    payload = bodyText ? JSON.parse(bodyText) : undefined;
-  } catch {
-    // body wasn't JSON
-  }
-  // Volvo's error envelope is `{ error: { message: "STATUS_NAME", description: "Human text", code?, details? } }`.
-  // The `description` is the user-actionable string; `message` is just the status name.
-  const error = (payload as {
-    error?: { code?: string; message?: string; description?: string; details?: unknown };
-  })?.error;
-  const description =
-    error?.description ??
-    error?.message ??
-    (typeof payload === "object" && payload && "description" in payload
-      ? String((payload as { description: unknown }).description)
-      : "");
-  const composed = description
-    ? `HTTP ${response.status} — ${description}`
-    : bodyText
-      ? `HTTP ${response.status} — ${bodyText.slice(0, 200)}`
-      : `HTTP ${response.status}`;
-  return new VolvoApiError(composed, response.status, error?.code ?? error?.message, error?.details ?? bodyText);
-}
-
 export { HTTPError };
+export { VolvoApiError, readError } from "./errors";

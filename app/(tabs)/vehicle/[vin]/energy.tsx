@@ -1,5 +1,6 @@
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { regionRestrictionHint } from "@/api/errors";
 import { BatteryGauge } from "@/components/BatteryGauge";
 import { renderResource } from "@/components/ResourceValue";
 import { StatusTile } from "@/components/StatusTile";
@@ -20,9 +21,11 @@ export default function EnergyScreen(): JSX.Element {
   }
 
   if (state.error) {
+    const hint = regionRestrictionHint(state.error);
     return (
       <View style={styles.center}>
         <Text style={styles.error}>{state.error.message}</Text>
+        {hint ? <Text style={styles.hint}>{hint}</Text> : null}
       </View>
     );
   }
@@ -116,4 +119,5 @@ const styles = StyleSheet.create({
   gaugeWrap: { alignItems: "center", paddingVertical: 16 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   error: { color: "#fbcaca" },
+  hint: { color: "#bdc1c6", fontSize: 13, lineHeight: 18, textAlign: "center", marginTop: 12, paddingHorizontal: 24 },
 });
