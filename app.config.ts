@@ -72,7 +72,7 @@ const withoutUpdatesNoise: ConfigPlugin = (config) =>
 const config = {
   name: "Vlv Companion",
   slug: "vlv-companion",
-  version: "1.0.0",
+  version: "1.0.1",
   orientation: "portrait",
   // Intentionally NOT setting `scheme:` at the top level — Expo's config
   // plugin would auto-emit a broad `<data android:scheme="volvo-companion"/>`
@@ -86,7 +86,7 @@ const config = {
   icon: "./assets/icon.png",
   android: {
     package: "app.volvocompanion",
-    versionCode: 1,
+    versionCode: 2,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#0b1726",
