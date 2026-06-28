@@ -15,6 +15,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { DEEP_LINK_URI as DEEP_LINK, VOLVO_OAUTH, type StoredTokens } from "./config";
 import { clearTokens, loadTokens, saveTokens } from "./storage";
+import { SessionExpiredError } from "./sessionError";
 import { getRuntimeConfig } from "@/lib/runtimeConfig";
 import { randomHex } from "@/api/trace";
 
@@ -220,10 +221,10 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
 
   const refresh = useCallback(async (current: StoredTokens): Promise<StoredTokens> => {
     if (!current.refreshToken) {
-      tokensRef.current = null;
-      await clearTokens();
-      setState({ status: "signed-out" });
-      throw new Error("No refresh token available; please sign in again.");
+      // Nothing to renew with — the session is over. Force a clean disconnect
+      // (signOut routes the app to the sign-in screen) and report it as such.
+      await signOut();
+      throw new SessionExpiredError("No refresh token available; please sign in again.");
     }
     if (refreshInFlight.current) return refreshInFlight.current;
     // Assign the in-flight ref synchronously, before any await — otherwise
@@ -254,15 +255,29 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     })();
     try {
       return await refreshInFlight.current;
+    } catch (err) {
+      // The access token has already lapsed (that's why we're here) and the
+      // refresh exchange failed — the session can't be recovered in-app. This
+      // covers an expired/revoked refresh token (invalid_grant), a refresh-
+      // endpoint error, AND any unexpected fault in the token pipeline (e.g.
+      // the "Cannot read property 'status' of undefined" crash that otherwise
+      // left the Garage dead with no recovery). Force a clean disconnect so the
+      // app routes to the sign-in screen, and surface a tagged error the UI can
+      // recognize. If signOut already raced this refresh, calling it again is a
+      // harmless no-op.
+      await signOut();
+      throw err instanceof SessionExpiredError
+        ? err
+        : new SessionExpiredError("Your session expired. Please sign in again.", { cause: err });
     } finally {
       refreshInFlight.current = null;
     }
-  }, [persist]);
+  }, [persist, signOut]);
 
   // Read tokens from the ref, not React state — see tokensRef comment above.
   const getAccessToken = useCallback(async (): Promise<string> => {
     const tokens = tokensRef.current;
-    if (!tokens) throw new Error("Not signed in.");
+    if (!tokens) throw new SessionExpiredError("Not signed in.");
     const now = Date.now();
     if (tokens.expiresAt - REFRESH_LEEWAY_MS > now) {
       return tokens.accessToken;
@@ -273,7 +288,7 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
 
   const forceRefreshAccessToken = useCallback(async (): Promise<string> => {
     const tokens = tokensRef.current;
-    if (!tokens) throw new Error("Not signed in.");
+    if (!tokens) throw new SessionExpiredError("Not signed in.");
     const refreshed = await refresh(tokens);
     return refreshed.accessToken;
   }, [refresh]);

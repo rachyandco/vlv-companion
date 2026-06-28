@@ -16,6 +16,7 @@ import {
 
 import { useAuth } from "@/auth/AuthProvider";
 import { DEFAULT_SCOPES } from "@/auth/config";
+import { classifyQueryError } from "@/auth/sessionError";
 import { useVehiclePrefs } from "@/hooks/useVehiclePrefs";
 import { useVehicles, VEHICLES_KEY } from "@/hooks/useVehicles";
 import { setRuntimeConfig } from "@/lib/runtimeConfig";
@@ -26,19 +27,26 @@ import { setRuntimeConfig } from "@/lib/runtimeConfig";
 // scope persists for the life of the JS bundle — exactly the right window.
 let autoJumped = false;
 
-function isSessionExpired(error: Error | null | undefined): boolean {
-  if (!error) return false;
-  const status = (error as Error & { status?: number }).status;
-  if (status === 401) return true;
-  return /invalid[_ ]grant|refresh.token|please sign in/i.test(error.message ?? "");
-}
-
 export default function GarageScreen(): JSX.Element {
   const { data, isLoading, isRefetching, refetch, error } = useVehicles();
-  const { signIn } = useAuth();
+  const { signIn, signOut } = useAuth();
   const queryClient = useQueryClient();
   const [reconnecting, setReconnecting] = useState(false);
   const router = useRouter();
+
+  // Categorize a query failure so the UI offers the right recovery. A broken
+  // session/token pipeline (expired refresh, or an unexpected fault such as the
+  // "Cannot read property 'status' of undefined" crash) must not be shown as a
+  // dead error — it needs a forced disconnect + reconnect. Transient/API errors
+  // keep showing their message with pull-to-refresh.
+  const errorKind = error ? classifyQueryError(error) : null;
+
+  // Force a clean disconnect, then route to the sign-in screen so the user can
+  // reconnect. signOut() clears tokens + cached data and flips auth state to
+  // signed-out, which the root AuthRouter redirects to /(auth)/sign-in.
+  const disconnect = () => {
+    void signOut();
+  };
 
   const reconnect = () => {
     if (reconnecting) return;
@@ -87,15 +95,17 @@ export default function GarageScreen(): JSX.Element {
       <Text style={styles.title}>Your vehicles</Text>
       {isLoading ? <ActivityIndicator color="#e8eaed" /> : null}
       {error ? (
-        isSessionExpired(error) ? (
+        errorKind === "session" ? (
           <View style={styles.expired}>
             <Text style={styles.expiredTitle}>Session expired</Text>
+            <Text style={styles.empty}>
+              Your sign-in could not be renewed. Disconnect and connect your Volvo account again.
+            </Text>
             <Pressable
-              onPress={reconnect}
-              disabled={reconnecting}
+              onPress={disconnect}
               style={({ pressed }) => [styles.reconnect, pressed && styles.pressed]}
             >
-              <Text style={styles.reconnectLabel}>{reconnecting ? "Reconnecting…" : "Reconnect"}</Text>
+              <Text style={styles.reconnectLabel}>Disconnect &amp; reconnect</Text>
             </Pressable>
           </View>
         ) : (
