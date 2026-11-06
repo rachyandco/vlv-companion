@@ -49,6 +49,7 @@ fn main() -> eframe::Result {
     let paths = paths::Paths::from_env();
     let config = config::load_config(&paths);
     let tokens = config::load_tokens(&paths);
+    let cache_dir = paths.cache_dir.clone();
     // Without a listener the worker still gets a (never-firing) callback channel.
     let callbacks = callbacks.unwrap_or_else(|| std::sync::mpsc::channel().1);
     eframe::run_native(
@@ -65,6 +66,7 @@ fn main() -> eframe::Result {
                 ui_config,
                 requests,
                 events,
+                cache_dir,
                 initial_callback,
             )))
         }),

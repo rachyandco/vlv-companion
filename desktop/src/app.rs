@@ -2,6 +2,7 @@
 //! activity, and draws the sidebar plus the current screen.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -13,6 +14,7 @@ use crate::config::Config;
 use crate::state::schedule::Activity;
 use crate::ui::dashboard::{self, DashboardAction, DashboardState};
 use crate::ui::data::VehicleData;
+use crate::ui::map::distance_km;
 use crate::ui::settings::{self, SettingsAction, SettingsDraft};
 use crate::ui::sidebar::{self, SidebarAction};
 use crate::ui::sign_in::{self, SignInAction, SignInForm};
@@ -26,6 +28,8 @@ const CONTENT_WIDTH: f32 = 720.0;
 /// The dashboard lays cards side by side, so it gets a wider column.
 const DASHBOARD_WIDTH: f32 = 1100.0;
 const CALLBACK_SCHEME: &str = "volvo-companion://";
+/// The charger overlay is fetched again once the car moved this far (km).
+const CHARGERS_REFETCH_KM: f64 = 0.2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Screen {
@@ -54,6 +58,10 @@ pub struct App {
     sign_in_form: SignInForm,
     settings_draft: Option<SettingsDraft>,
     dashboard: DashboardState,
+    /// Root of the on-disk caches (map tiles go under `tiles/`).
+    cache_dir: PathBuf,
+    /// Where the charger list was last requested for, while the overlay is on.
+    chargers_at: Option<(f64, f64)>,
     initial_callback: Option<String>,
     /// (last_input, focused, minimised) as last sent, and when.
     activity: Activity,
@@ -65,6 +73,7 @@ impl App {
         config: Config,
         tx: Sender<UiRequest>,
         rx: Receiver<WorkerEvent>,
+        cache_dir: PathBuf,
         initial_callback: Option<String>,
     ) -> App {
         #[allow(unused_mut)] // only the debug demo mutates it
@@ -85,6 +94,8 @@ impl App {
             banner: None,
             settings_draft: None,
             dashboard: DashboardState::default(),
+            cache_dir,
+            chargers_at: None,
             initial_callback: initial_callback.filter(|u| u.starts_with(CALLBACK_SCHEME)),
             activity: Activity {
                 last_input: Instant::now(),
@@ -131,6 +142,8 @@ impl App {
                 self.state.vehicles.clear();
                 self.state.garage.clear();
                 self.state.selected_vin = None;
+                self.dashboard.set_stations(Vec::new());
+                self.chargers_at = None;
                 self.screen = Screen::Dashboard;
                 self.settings_draft = None;
                 self.sign_in_form = SignInForm::from_config(&self.state.config);
@@ -181,10 +194,12 @@ impl App {
                 self.state.session_expired = Some(msg);
             }
             WorkerEvent::Offline(offline) => self.state.offline = offline,
-            // Drawn by the dashboard map and climate tasks.
-            WorkerEvent::Chargers(_)
-            | WorkerEvent::ClimateStarted { .. }
-            | WorkerEvent::ClimateStopped { .. } => {}
+            WorkerEvent::Chargers(Ok(list)) => self.dashboard.set_stations(list),
+            WorkerEvent::Chargers(Err(msg)) => {
+                self.set_banner(Level::Warn, format!("EV chargers: {msg}"));
+            }
+            // Drawn by the climate task.
+            WorkerEvent::ClimateStarted { .. } | WorkerEvent::ClimateStopped { .. } => {}
         }
     }
 
@@ -373,6 +388,11 @@ impl App {
             ui.label(muted("Loading vehicles…"));
             return;
         };
+        self.dashboard.map.configure(
+            ui.ctx(),
+            self.state.config.tile_url_template.as_deref(),
+            &self.cache_dir,
+        );
         let label = vehicle_label(&self.state.config, &self.state.vehicles, &vin);
         let data = self.state.vehicles.get(&vin);
         let actions = dashboard::show(
@@ -386,6 +406,31 @@ impl App {
         for action in actions {
             self.on_dashboard(&vin, action);
         }
+        self.fetch_chargers_if_due(&vin);
+    }
+
+    /// While the charger overlay is on, asks for chargers around the car
+    /// when none were requested yet or the car moved more than 200 m.
+    fn fetch_chargers_if_due(&mut self, vin: &str) {
+        if !self.dashboard.map.chargers_on {
+            return;
+        }
+        let Some(loc) = self
+            .state
+            .vehicles
+            .get(vin)
+            .and_then(|d| d.location.as_ref())
+        else {
+            return;
+        };
+        let (lat, lon) = (loc.latitude, loc.longitude);
+        let due = self
+            .chargers_at
+            .is_none_or(|(a, b)| distance_km(a, b, lat, lon) > CHARGERS_REFETCH_KM);
+        if due {
+            self.chargers_at = Some((lat, lon));
+            self.send(UiRequest::FetchChargers { lat, lon });
+        }
     }
 
     fn on_dashboard(&mut self, vin: &str, action: DashboardAction) {
@@ -397,12 +442,30 @@ impl App {
                     runtime_minutes,
                 });
             }
-            // Wired to the map in Task 12.
-            DashboardAction::RefreshLocation
-            | DashboardAction::ToggleChargers
-            | DashboardAction::OpenInMaps(..)
-            | DashboardAction::OpenStation(..)
-            | DashboardAction::SetTileTemplate(_) => {}
+            // The worker has no per-resource refresh; like the phone's
+            // pull-to-refresh, this forces every resource.
+            DashboardAction::RefreshLocation => self.send(UiRequest::Refresh {
+                vin: vin.to_string(),
+                force: true,
+            }),
+            // The map flips `chargers_on` itself; turning it on fetches anew.
+            DashboardAction::ToggleChargers => {
+                if self.dashboard.map.chargers_on {
+                    self.chargers_at = None;
+                }
+            }
+            DashboardAction::OpenInMaps(lat, lon) | DashboardAction::OpenStation(lat, lon) => {
+                // `geo` waits up to 300 ms for xdg-open: keep it off the UI thread.
+                std::thread::spawn(move || {
+                    if let Err(e) = crate::open::geo(lat, lon) {
+                        eprintln!("cannot open the map: {e}");
+                    }
+                });
+            }
+            DashboardAction::SetTileTemplate(template) => {
+                self.state.config.tile_url_template = Some(template);
+                self.send(UiRequest::SaveConfig(self.state.config.clone()));
+            }
         }
     }
 }

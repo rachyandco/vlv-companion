@@ -1,25 +1,30 @@
-//! Vehicle dashboard: header, status cards, car top view and tyres. The map,
-//! health and controls rows come in later tasks.
+//! Vehicle dashboard: header, status cards, car top view, tyres and map,
+//! then the energy, health and trip rows. Controls come in a later task.
 
 use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, RichText, Stroke, Ui};
 
 use crate::api::commands::CommandName;
 use crate::api::models::{render, render_energy, EnergyField, RString, Tyres};
+use crate::api::overpass::ChargingStation;
 use crate::config::Config;
 use crate::state::cache::Resource;
 use crate::theme::{card, Colors, RADIUS};
 use crate::ui::car_view::{CarView, CAR_ASPECT, DEFAULT_WIDTH};
 use crate::ui::cards::{battery_card, lock_card, slot, status_card, CARD_MIN_WIDTH};
 use crate::ui::data::VehicleData;
+use crate::ui::map::{MapPanel, MAP_HEIGHT};
 use crate::ui::model_line;
 use crate::ui::widgets::{muted, section_title};
+use crate::ui::{energy, health};
 use crate::warnings::{engine_label, humanize_value};
 
 const GAP: f32 = 12.0;
 /// Two tyre cells, the gap between them and the card margins.
 const TYRES_WIDTH: f32 = 2.0 * CARD_MIN_WIDTH + GAP + 28.0;
-/// Narrower than this, the map placeholder moves to its own line.
-const MAP_MIN_WIDTH: f32 = 240.0;
+/// Narrower than this, the map moves under the car and tyres.
+const MAP_ROW_MIN_WIDTH: f32 = 900.0;
+/// Nor does the map stay beside them in less than this.
+const MAP_MIN_WIDTH: f32 = 320.0;
 
 /// Per-dashboard UI state kept across frames.
 #[derive(Debug, Default)]
@@ -31,6 +36,10 @@ pub struct DashboardState {
     /// Lock or unlock sent and not answered yet: (VIN, command). While set,
     /// the lock card ignores clicks, like the phone's `busy` flag.
     pending: Option<(String, CommandName)>,
+    /// Map tiles, view and charger overlay.
+    pub map: MapPanel,
+    /// Chargers near the car from the last successful fetch.
+    pub stations: Vec<ChargingStation>,
 }
 
 impl DashboardState {
@@ -49,6 +58,12 @@ impl DashboardState {
         {
             self.pending = None;
         }
+    }
+
+    /// Replaces the charger list (a new fetch answered).
+    pub fn set_stations(&mut self, stations: Vec<ChargingStation>) {
+        self.stations = stations;
+        self.map.selected_station = None;
     }
 
     /// True while a lock or unlock for `vin` is in flight.
@@ -70,7 +85,6 @@ impl DashboardState {
 
 /// Things the dashboard asks the app to do.
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)] // the map variants are produced by the map in Task 12
 pub enum DashboardAction {
     Command(CommandName, Option<u8>),
     RefreshLocation,
@@ -123,7 +137,28 @@ pub fn show(
     });
     ui.add_space(GAP);
 
-    middle_row(ui, state, d, is_ev);
+    middle_row(ui, state, d, is_ev, &mut actions);
+
+    if d.energy_state.is_some() || d.energy_caps.is_some() {
+        section_title(ui, "Energy");
+        wrapped_row(ui, |ui| {
+            energy::show(ui, d.energy_state.as_ref(), d.energy_caps.as_ref())
+        });
+    }
+    section_title(ui, "Health");
+    wrapped_row(ui, |ui| {
+        health::show_health(
+            ui,
+            d.engine_diag.as_ref(),
+            d.brakes.as_ref(),
+            d.warnings.as_ref(),
+        )
+    });
+    if d.statistics.is_some() {
+        section_title(ui, "Trip");
+        wrapped_row(ui, |ui| health::show_trip(ui, d.statistics.as_ref(), is_ev));
+    }
+    ui.add_space(GAP);
     errors(ui, data);
 
     // A refresh showed the car is no longer locked: nothing to unlock.
@@ -242,10 +277,29 @@ fn wrapped_row(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
     );
 }
 
-/// Car view, tyre grid, and the space the map will take. Wraps on narrow
-/// windows; the car shrinks to fit when even it alone does not.
-fn middle_row(ui: &mut Ui, state: &mut DashboardState, d: &VehicleData, is_ev: bool) {
+/// "06 Nov 14:05" from the position's RFC 3339 timestamp.
+fn position_time(ts: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(ts)
+        .map(|t| {
+            t.with_timezone(&chrono::Local)
+                .format("%d %b %H:%M")
+                .to_string()
+        })
+        .unwrap_or_else(|_| ts.to_string())
+}
+
+/// Car view and tyre grid at their fixed widths, the map in the rest.
+/// Below `MAP_ROW_MIN_WIDTH` the map wraps under them; the car shrinks to
+/// fit when even it alone does not.
+fn middle_row(
+    ui: &mut Ui,
+    state: &mut DashboardState,
+    d: &VehicleData,
+    is_ev: bool,
+    actions: &mut Vec<DashboardAction>,
+) {
     const PAD: f32 = 28.0; // card inner margin, both sides
+    let row_width = ui.available_width();
     let car_width = DEFAULT_WIDTH.min(ui.available_width() - PAD).max(80.0);
     let inner_height = car_width * CAR_ASPECT + 26.0;
     wrapped_row(ui, |ui| {
@@ -273,15 +327,27 @@ fn middle_row(ui: &mut Ui, state: &mut DashboardState, d: &VehicleData, is_ev: b
                 });
             })
         });
-        if ui.available_width() < MAP_MIN_WIDTH {
+        // `available_width` is the full row in a wrapping layout; what is
+        // left beside the tyres is the space before the wrap.
+        if row_width < MAP_ROW_MIN_WIDTH || ui.available_size_before_wrap().x < MAP_MIN_WIDTH {
             ui.end_row();
         }
-        let map_width = ui.available_width().max(CARD_MIN_WIDTH);
+        let map_width = ui.available_size_before_wrap().x.max(CARD_MIN_WIDTH);
+        let location = d.location.as_ref();
+        let updated = location
+            .and_then(|l| l.timestamp.as_deref())
+            .map(position_time);
         slot(ui, map_width, |ui| {
             card(ui, |ui| {
-                ui.set_min_size(egui::vec2(map_width - PAD, inner_height));
-                ui.centered_and_justified(|ui| {
-                    ui.label(muted("Map (coming in Task 12)"));
+                ui.set_min_size(egui::vec2(map_width - PAD, inner_height.max(MAP_HEIGHT)));
+                ui.set_max_width(map_width - PAD);
+                ui.vertical(|ui| {
+                    actions.extend(state.map.show(
+                        ui,
+                        location,
+                        &state.stations,
+                        updated.as_deref(),
+                    ));
                 });
             })
         });

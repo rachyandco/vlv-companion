@@ -20,7 +20,7 @@ use crate::paths::Paths;
 pub const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(20 * 60);
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
-const USER_AGENT: &str = concat!(
+pub const USER_AGENT: &str = concat!(
     "VlvCompanion/",
     env!("CARGO_PKG_VERSION"),
     " (linux-desktop)"

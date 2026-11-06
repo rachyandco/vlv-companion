@@ -1,5 +1,6 @@
 //! Debug-only offline demo: `VLV_DEMO=1 cargo run` seeds a fake car so the
-//! dashboard renders without signing in.
+//! dashboard renders without signing in. `VLV_DEMO_TILES=1` also turns on
+//! OpenStreetMap tiles in memory (nothing is saved).
 
 use std::time::Instant;
 
@@ -9,6 +10,7 @@ use crate::api::models::VehicleListItem;
 use crate::app::AppState;
 use crate::state::cache::Resource;
 use crate::ui::data::VehicleData;
+use crate::ui::map::OSM_TEMPLATE;
 
 const VIN: &str = "YV1DEMO";
 
@@ -69,12 +71,62 @@ pub fn seed(state: &mut AppState) {
             Resource::EnergyState,
             json!({"batteryChargeLevel": {"status": "OK", "value": 44, "unit": "percentage"},
                 "electricRange": {"status": "OK", "value": 18, "unit": "km"},
-                "chargingStatus": {"status": "OK", "value": "IDLE"}}),
+                "chargerConnectionStatus": {"status": "OK", "value": "CONNECTED"},
+                "chargingStatus": {"status": "OK", "value": "CHARGING"},
+                "chargingType": {"status": "OK", "value": "AC"},
+                "chargingPower": {"status": "OK", "value": 3600, "unit": "watts"},
+                "targetBatteryChargeLevel": {"status": "OK", "value": 90},
+                "estimatedChargingTimeToTargetBatteryChargeLevel": {"status": "OK", "value": 145},
+                "chargingCurrentLimit": {"status": "ERROR", "code": "NOT_SUPPORTED"}}),
+        ),
+        (
+            Resource::EnergyCaps,
+            json!({"getEnergyState": {"isSupported": true,
+                "chargerConnectionStatus": {"isSupported": true},
+                "chargingSystemStatus": {"isSupported": true},
+                "chargingType": {"isSupported": true},
+                "chargingPower": {"isSupported": true},
+                "targetBatteryChargeLevel": {"isSupported": true},
+                "estimatedChargingTimeToTargetBatteryChargeLevel": {"isSupported": true},
+                "chargingCurrentLimit": {"isSupported": false}}}),
+        ),
+        (
+            Resource::Location,
+            json!({"data": {"type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [6.1432, 46.2044, 0.0]},
+                "properties": {"heading": "90", "timestamp": "2026-11-06T08:42:00Z"}}}),
+        ),
+        (
+            Resource::EngineDiag,
+            json!({"data": {"oilLevelWarning": v("NO_WARNING"),
+                "engineCoolantLevelWarning": v("NO_WARNING")}}),
+        ),
+        (
+            Resource::Brakes,
+            json!({"data": {"brakeFluidLevelWarning": v("NO_WARNING")}}),
+        ),
+        (
+            Resource::Warnings,
+            json!({"data": {"brakeLightCenterWarning": v("NO_WARNING"),
+                "hazardLightsWarning": v("NO_WARNING"),
+                "turnIndicationRearLeftWarning": v("FAILURE"),
+                "fogLightRearWarning": v("UNSPECIFIED")}}),
+        ),
+        (
+            Resource::Statistics,
+            json!({"data": {"tripMeter1": {"value": 1234.5, "unit": "km"},
+                "tripMeter2": {"value": 87.2, "unit": "km"},
+                "averageSpeed": {"value": 42, "unit": "km/h"},
+                "averageFuelConsumption": {"value": 5.8, "unit": "l/100km"},
+                "distanceToEmpty": {"value": 420, "unit": "km"}}}),
         ),
     ];
     let mut data = VehicleData::default();
     for (resource, body) in fixtures {
         data.apply(resource, Ok(body), Instant::now());
+    }
+    if std::env::var("VLV_DEMO_TILES").as_deref() == Ok("1") {
+        state.config.tile_url_template = Some(OSM_TEMPLATE.into());
     }
     state.signed_in = true;
     state.garage = vec![VehicleListItem {

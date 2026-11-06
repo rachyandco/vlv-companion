@@ -6,7 +6,6 @@ use std::collections::BTreeMap;
 use crate::api::models::RString;
 
 /// How a warning field reads: fine, needs attention, or not reported.
-#[allow(dead_code)] // used by the health row (Task 13)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level3 {
     Ok,
@@ -29,7 +28,6 @@ pub fn humanize_value(v: &str) -> String {
 
 /// Text and level of a warning field: `NO_WARNING`/`NONE`/`OK` are fine,
 /// `UNSPECIFIED` or a missing field is unknown, anything else is a warning.
-#[allow(dead_code)] // used by the health row (Task 13)
 pub fn describe(field: Option<&RString>) -> (String, Level3) {
     let Some(field) = field else {
         return ("—".into(), Level3::Unknown);
@@ -42,7 +40,6 @@ pub fn describe(field: Option<&RString>) -> (String, Level3) {
 }
 
 /// "brakeLightCenterWarning" -> "Brake light center".
-#[allow(dead_code)] // used by the health row (Task 13)
 pub fn humanize_key(k: &str) -> String {
     let base = k.strip_suffix("Warning").unwrap_or(k);
     let mut out = String::with_capacity(base.len() + 4);
@@ -60,7 +57,6 @@ pub fn humanize_key(k: &str) -> String {
 }
 
 /// (label, text) of every entry that is a warning, in map order.
-#[allow(dead_code)] // used by the health row (Task 13)
 pub fn active(map: &BTreeMap<String, RString>) -> Vec<(String, String)> {
     map.iter()
         .filter_map(|(k, f)| match describe(Some(f)) {
@@ -68,6 +64,11 @@ pub fn active(map: &BTreeMap<String, RString>) -> Vec<(String, String)> {
             _ => None,
         })
         .collect()
+}
+
+/// True when at least one entry reads as fine (phone's `hasAnyOk`).
+pub fn has_any_ok(map: &BTreeMap<String, RString>) -> bool {
+    map.values().any(|f| describe(Some(f)).1 == Level3::Ok)
 }
 
 /// "Engine running" / "Engine off", or nothing for other states.
@@ -154,6 +155,17 @@ mod tests {
         m.insert("brakeLightCenterWarning".to_string(), f("NO_WARNING"));
         m.insert("hazardLightsWarning".to_string(), f("no_warning"));
         assert!(active(&m).is_empty());
+    }
+
+    #[test]
+    fn has_any_ok_needs_one_fine_entry() {
+        let mut m = BTreeMap::new();
+        assert!(!has_any_ok(&m));
+        m.insert("fogLightRearWarning".to_string(), f("UNSPECIFIED"));
+        m.insert("lowBeamLeftWarning".to_string(), f("FAILURE"));
+        assert!(!has_any_ok(&m));
+        m.insert("hazardLightsWarning".to_string(), f("NO_WARNING"));
+        assert!(has_any_ok(&m));
     }
 
     #[test]
