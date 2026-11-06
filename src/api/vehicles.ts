@@ -1,14 +1,21 @@
 import type { KyInstance } from "ky";
 
 import type {
+  BrakesResponse,
   CommandAccessibilityResponse,
+  CommandListResponse,
   DiagnosticsResponse,
   DoorsResponse,
+  EngineDiagnosticsResponse,
+  EngineStatusResponse,
   FuelResponse,
   OdometerResponse,
+  StatisticsResponse,
   TyrePressureResponse,
   VehicleDetailsResponse,
   VehicleList,
+  WarningsResponse,
+  WindowsResponse,
 } from "./types";
 
 const PREFIX = "connected-vehicle/v2";
@@ -46,4 +53,35 @@ export async function getCommandAccessibility(
   vin: string,
 ): Promise<CommandAccessibilityResponse> {
   return api.get(`${PREFIX}/vehicles/${vin}/command-accessibility`).json<CommandAccessibilityResponse>();
+}
+
+export async function getWindows(api: KyInstance, vin: string): Promise<WindowsResponse> {
+  return api.get(`${PREFIX}/vehicles/${vin}/windows`).json<WindowsResponse>();
+}
+
+export async function getWarnings(api: KyInstance, vin: string): Promise<WarningsResponse> {
+  return api.get(`${PREFIX}/vehicles/${vin}/warnings`).json<WarningsResponse>();
+}
+
+export async function getStatistics(api: KyInstance, vin: string): Promise<StatisticsResponse> {
+  return api.get(`${PREFIX}/vehicles/${vin}/statistics`).json<StatisticsResponse>();
+}
+
+export async function getEngineDiagnostics(
+  api: KyInstance,
+  vin: string,
+): Promise<EngineDiagnosticsResponse> {
+  return api.get(`${PREFIX}/vehicles/${vin}/engine`).json<EngineDiagnosticsResponse>();
+}
+
+export async function getEngineStatus(api: KyInstance, vin: string): Promise<EngineStatusResponse> {
+  return api.get(`${PREFIX}/vehicles/${vin}/engine-status`).json<EngineStatusResponse>();
+}
+
+export async function getBrakes(api: KyInstance, vin: string): Promise<BrakesResponse> {
+  return api.get(`${PREFIX}/vehicles/${vin}/brakes`).json<BrakesResponse>();
+}
+
+export async function listCommands(api: KyInstance, vin: string): Promise<CommandListResponse> {
+  return api.get(`${PREFIX}/vehicles/${vin}/commands`).json<CommandListResponse>();
 }
