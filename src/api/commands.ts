@@ -1,6 +1,7 @@
 import type { KyInstance } from "ky";
 
 import type {
+  CommandListItem,
   CommandName,
   EngineStartRequest,
   Invoke,
@@ -80,4 +81,32 @@ const FRIENDLY: Partial<Record<InvokeStatus, string>> = {
 
 export function friendlyMessage(status: InvokeStatus, fallback?: string): string {
   return FRIENDLY[status] ?? fallback ?? status.replaceAll("_", " ").toLowerCase();
+}
+
+const API_TO_PATH: Record<string, CommandName> = {
+  HONK_AND_FLASH: "honk-flash",
+  HONK: "honk",
+  FLASH: "flash",
+  LOCK: "lock",
+  LOCK_REDUCED_GUARD: "lock-reduced-guard",
+  UNLOCK: "unlock",
+  ENGINE_START: "engine-start",
+  ENGINE_STOP: "engine-stop",
+  CLIMATIZATION_START: "climatization-start",
+  CLIMATIZATION_STOP: "climatization-stop",
+};
+
+/** Maps a Volvo command-list name (e.g. `HONK_AND_FLASH`) to its POST path name, or null if the app cannot send it. */
+export function commandNameFromApi(name: string): CommandName | null {
+  return Object.hasOwn(API_TO_PATH, name) ? (API_TO_PATH[name] ?? null) : null;
+}
+
+/** The set of app command names the vehicle advertises as available in its command list. */
+export function supportedCommands(list: CommandListItem[] | undefined): Set<CommandName> {
+  const out = new Set<CommandName>();
+  for (const item of list ?? []) {
+    const mapped = item.command ? commandNameFromApi(item.command) : null;
+    if (mapped) out.add(mapped);
+  }
+  return out;
 }
