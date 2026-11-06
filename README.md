@@ -13,6 +13,7 @@ A degoogled-friendly **React Native Android** client for the [Volvo Cars public 
   - **Energy** — battery gauge, charging status, target SoC, charging power, time-to-target, current limit.
   - **Location** — MapLibre + OpenFreeMap tiles, "Open in maps" handoff to OsmAnd / Organic Maps / Magic Earth via `geo:lat,lng`. Optional EV-charger overlay (OpenStreetMap Overpass).
   - **Commands** — lock, lock with reduced guard, unlock (with the `readyToUnlock` countdown banner), honk, flash, honk-and-flash, climatisation start/stop, engine start (1–15 min) / stop.
+- Linux desktop client (Rust, egui) with the same sign-in and the same dashboard data, shipped as a .deb.
 
 ## Stack
 
@@ -111,7 +112,34 @@ Tap **Connect Volvo account** — this opens your system browser for Volvo's log
 
 You can edit any of these later under the **Settings** tab. Changing the OAuth client/secret/VCC-API-Key automatically signs you out so the next sign-in uses the new credentials cleanly.
 
-Volvo ID does not grant third-party apps the `offline_access` scope, so the refresh token's lifetime follows Volvo's session policy rather than being unlimited. When it lapses the app signs you out and the Garage shows a session-expired message; tap **Reconnect** to sign in again.
+Volvo ID does not grant third-party apps the `offline_access` scope, so the refresh token's lifetime follows Volvo's session policy rather than being unlimited. When it lapses the app signs you out and the Garage shows a session-expired message; tap **Reconnect** to sign in again. In practice the session lasts about 30 minutes without use (observed November 2026), so expect to reconnect after leaving the app idle for longer.
+
+## Linux desktop
+
+A native desktop client lives in `desktop/` (Rust, egui). It is released as a `.deb` alongside the APK.
+
+**Install**
+
+```bash
+sudo apt install ./vlv-companion_<ver>_amd64.deb
+```
+
+**Sign in.** The first launch shows the sign-in screen with the same five fields as the phone. Signing in opens your system browser; the bridge page hands the result back through the `volvo-companion://` scheme that the .deb registers (`/usr/share/applications/vlv-companion.desktop`). If your browser refuses custom schemes, paste the callback URL into the fallback field on the sign-in screen. Starting the app a second time prints "Vlv Companion is already running." and exits.
+
+**Files.** Config is stored at `~/.config/vlv-companion/config.json` and tokens at `~/.local/state/vlv-companion/tokens.json`, both with mode 0600.
+
+**Map tiles.** The map needs a raster tile server and none is configured by default. Click **Use OpenStreetMap tiles** to opt in to the OSM tile servers, and read the [OSM tile usage policy](https://operations.osmfoundation.org/policies/tiles/) first.
+
+**Refresh.** Data auto-refreshes every 60 s while the window is focused and every 5 min when idle or unfocused, and never while minimised. While the app runs, the session is kept alive with a token refresh every 20 min. Launching after more than about 30 min away shows the session-expired notice and needs **Connect Volvo account** to sign in again. A temporary token-endpoint outage (5xx, 429) does not sign you out; the refresh is retried a minute later.
+
+**Build locally**
+
+```bash
+cd desktop && cargo run
+cargo install cargo-deb && cargo deb   # run inside desktop/
+```
+
+The APK and the .deb are released together from one `v*` tag, and a release only exists when both built. The desktop Cargo version must equal the tag; the CI check fails otherwise.
 
 ## Continuous Integration
 
@@ -122,7 +150,9 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow installs JDK 17 + Android SDK 35 + NDK 27.1, runs `pnpm install`, `pnpm prebuild --no-install`, lints/typechecks/tests, then `./gradlew assembleRelease` with the keystore secrets, and uploads the APK both as a workflow artifact and as a GitHub Release asset.
+The workflow installs JDK 17 + Android SDK 35 + NDK 27.1, runs `pnpm install`, `pnpm prebuild --no-install`, lints/typechecks/tests, then `./gradlew assembleRelease` with the keystore secrets, and uploads the APK as a workflow artifact.
+
+A parallel `desktop` job on `ubuntu-22.04` checks that `desktop/Cargo.toml`'s version equals the tag (`desktop/packaging/check-version.sh`), runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`, then builds the `.deb` with `cargo deb` and uploads it as a workflow artifact. The `release` job needs both jobs: it publishes the GitHub Release with the APK and the `.deb` only when both artifacts built.
 
 ## API surface (covered today)
 
@@ -133,11 +163,13 @@ The workflow installs JDK 17 + Android SDK 35 + NDK 27.1, runs `pnpm install`, `
 - `GET  /energy/v2/vehicles/{vin}/{state,capabilities}`
 - `GET  /location/v1/vehicles/{vin}/location`
 
+Every read endpoint of the three APIs is covered; the deprecated Energy v1 `recharge-status` is intentionally skipped.
+
 ## Security notes
 
 - The OAuth client_id is *not* a secret — it is shipped with the APK and protected by PKCE on the code exchange.
-- The OAuth **client_secret** *is* a secret and is held only in the device's Android Keystore (via `expo-secure-store`).
-- The VCC-API-Key is rate-limited per key; treat it as semi-secret. It is also held only in the Keystore.
+- The OAuth **client_secret** *is* a secret. On Android it is held only in the device's Android Keystore (via `expo-secure-store`); on the Linux desktop it lives in `~/.config/vlv-companion/config.json` with mode 0600.
+- The VCC-API-Key is rate-limited per key; treat it as semi-secret. It is stored alongside the client secret: in the Keystore on Android, in the same 0600 `config.json` on the desktop.
 - Tokens never leave the device.
 - The app requests only `INTERNET`. Location permission is explicitly *blocked* — we read the **vehicle's** location from the API, never the device's GPS.
 
@@ -149,7 +181,7 @@ The workflow installs JDK 17 + Android SDK 35 + NDK 27.1, runs `pnpm install`, `
 - **OAuth fails with `invalid_request` before the password prompt** — your developer-portal application is **unpublished**, or the redirect URI registered there does not match what's saved in the app (trailing slash and scheme matter).
 - **Sign-in succeeds but Garage shows "No vehicles linked"** — the OAuth flow re-used a cached Volvo session whose consent has 0 vehicles selected. Tap **Reconnect** on the Garage screen — it sends `prompt=login` so Volvo re-prompts for password and the vehicle-picker. If Volvo still skips the picker, sign out of `auth.volvocars.com` in your default browser, or revoke this app at <https://www.volvocars.com/intl/v/your-volvo> → connected apps, then reconnect.
 - **401 immediately after changing credentials** — older tokens are bound to the previous client. Settings auto-signs-out on credential change.
-- **"Your session expired" after the app sat idle** — the refresh token reached the end of Volvo ID's session lifetime (see *Configure at runtime*). Tap **Reconnect**; nothing is misconfigured.
+- **"Your session expired" after the app sat idle** — the refresh token reached the end of Volvo ID's session lifetime (about 30 minutes without use; see *Configure at runtime*). Tap **Reconnect**; nothing is misconfigured.
 - **Tyre cells say "—" or "No sensor"** — Volvo returns `UNSPECIFIED` / `NO_SENSOR` when the car hasn't pushed a fresh TPMS reading lately. Driving the car (or unlocking it) usually wakes the sensors. If it persists across drives, your model only exposes aggregate warnings, not per-corner pressures.
 
 ## License

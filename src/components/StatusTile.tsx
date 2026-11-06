@@ -5,13 +5,14 @@ type Props = {
   value: string | number;
   hint?: string;
   unsupported?: boolean;
+  valueColor?: string;
 };
 
-export function StatusTile({ label, value, hint, unsupported }: Props): JSX.Element {
+export function StatusTile({ label, value, hint, unsupported, valueColor }: Props): JSX.Element {
   return (
     <View style={[styles.tile, unsupported && styles.unsupported]}>
       <Text style={styles.label}>{label}</Text>
-      <Text style={styles.value} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+      <Text style={[styles.value, valueColor ? { color: valueColor } : null]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
         {value}
       </Text>
       {hint ? <Text style={styles.hint}>{hint}</Text> : null}

@@ -78,6 +78,85 @@ export type Diagnostics = {
 };
 export type DiagnosticsResponse = { data: Diagnostics };
 
+export type Windows = {
+  frontLeftWindow?: ResourceInstanceString;
+  frontRightWindow?: ResourceInstanceString;
+  rearLeftWindow?: ResourceInstanceString;
+  rearRightWindow?: ResourceInstanceString;
+  sunroof?: ResourceInstanceString;
+};
+export type WindowsResponse = { data: Windows };
+
+export type ExteriorWarnings = Record<string, ResourceInstanceString | undefined> & {
+  brakeLightCenterWarning?: ResourceInstanceString;
+  brakeLightLeftWarning?: ResourceInstanceString;
+  brakeLightRightWarning?: ResourceInstanceString;
+  fogLightFrontWarning?: ResourceInstanceString;
+  fogLightRearWarning?: ResourceInstanceString;
+  positionLightFrontLeftWarning?: ResourceInstanceString;
+  positionLightFrontRightWarning?: ResourceInstanceString;
+  positionLightRearLeftWarning?: ResourceInstanceString;
+  positionLightRearRightWarning?: ResourceInstanceString;
+  highBeamLeftWarning?: ResourceInstanceString;
+  highBeamRightWarning?: ResourceInstanceString;
+  lowBeamLeftWarning?: ResourceInstanceString;
+  lowBeamRightWarning?: ResourceInstanceString;
+  daytimeRunningLightLeftWarning?: ResourceInstanceString;
+  daytimeRunningLightRightWarning?: ResourceInstanceString;
+  turnIndicationFrontLeftWarning?: ResourceInstanceString;
+  turnIndicationFrontRightWarning?: ResourceInstanceString;
+  turnIndicationRearLeftWarning?: ResourceInstanceString;
+  turnIndicationRearRightWarning?: ResourceInstanceString;
+  registrationPlateLightWarning?: ResourceInstanceString;
+  sideMarkLightsWarning?: ResourceInstanceString;
+  hazardLightsWarning?: ResourceInstanceString;
+  reverseLightsWarning?: ResourceInstanceString;
+};
+export type WarningsResponse = { data: ExteriorWarnings };
+
+export type Statistics = {
+  averageSpeed?: ResourceInstanceWithUnit<number>;
+  distanceToEmpty?: ResourceInstanceWithUnit<number>;
+  tripMeter1?: ResourceInstanceWithUnit<number>;
+  tripMeter2?: ResourceInstanceWithUnit<number>;
+  averageFuelConsumption?: ResourceInstanceWithUnit<number>;
+  // Field names Volvo actually sends for current (2024+) cars; the published
+  // spec still lists the five above. Observed 2026-11-06 on an XC40 Recharge.
+  tripMeterManual?: ResourceInstanceWithUnit<number>;
+  tripMeterAutomatic?: ResourceInstanceWithUnit<number>;
+  averageSpeedAutomatic?: ResourceInstanceWithUnit<number>;
+  averageEnergyConsumption?: ResourceInstanceWithUnit<number>;
+  distanceToEmptyBattery?: ResourceInstanceWithUnit<number>;
+};
+export type StatisticsResponse = { data: Statistics };
+
+export type EngineDiagnostics = {
+  oilLevelWarning?: ResourceInstanceString;
+  engineCoolantLevelWarning?: ResourceInstanceString;
+};
+export type EngineDiagnosticsResponse = { data: EngineDiagnostics };
+
+export type EngineStatus = { engineStatus?: ResourceInstanceString };
+export type EngineStatusResponse = { data: EngineStatus };
+
+export type Brakes = { brakeFluidLevelWarning?: ResourceInstanceString };
+export type BrakesResponse = { data: Brakes };
+
+export type ApiCommandName =
+  | "HONK_AND_FLASH"
+  | "HONK"
+  | "FLASH"
+  | "LOCK"
+  | "LOCK_REDUCED_GUARD"
+  | "UNLOCK"
+  | "ENGINE_START"
+  | "ENGINE_STOP"
+  | "CLIMATIZATION_START"
+  | "CLIMATIZATION_STOP"
+  | "SEND_NAVI_POI";
+export type CommandListItem = { command?: ApiCommandName; href?: string };
+export type CommandListResponse = { data?: CommandListItem[] };
+
 export type CommandAccessibility = {
   availabilityStatus?: {
     value: string;

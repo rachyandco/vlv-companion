@@ -46,6 +46,7 @@ export const DEFAULT_SCOPES = [
   "conve:honk_flash",
   "conve:warnings",
   "conve:diagnostics_engine_status",
+  "conve:diagnostics_workshop",
   "conve:brake_status",
   "conve:command_accessibility",
   "conve:commands",

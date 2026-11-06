@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Vlv Companion
+Comment=Volvo Cars API client (independent project)
+Exec=vlv-companion %u
+Icon=vlv-companion
+Terminal=false
+Categories=Utility;
+MimeType=x-scheme-handler/volvo-companion;

@@ -108,12 +108,48 @@ jobs:
           name: vlv-companion-${{ github.ref_name }}
           path: vlv-companion-*.apk
 
+  desktop:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Check version matches tag
+        run: bash desktop/packaging/check-version.sh "${GITHUB_REF_NAME}"
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libxkbcommon-dev libwayland-dev libgl1-mesa-dev libfontconfig1-dev
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          workspaces: desktop
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+
+      - name: Format, lint, test
+        working-directory: desktop
+        run: cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+
+      - name: Build deb
+        working-directory: desktop
+        run: cargo deb && ls target/debian/
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: vlv-companion-${{ github.ref_name }}-deb
+          path: desktop/target/debian/*.deb
+
   # Splitting the build (read-only) and release (contents:write) phases keeps
   # the GITHUB_TOKEN scope as narrow as possible: keystore secrets only exist
   # in the build job, write capability only exists in the release job.
   release:
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, desktop]
     timeout-minutes: 10
     permissions:
       contents: write
@@ -123,7 +159,13 @@ jobs:
         with:
           name: vlv-companion-${{ github.ref_name }}
 
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: vlv-companion-${{ github.ref_name }}-deb
+
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          files: vlv-companion-*.apk
+          files: |
+            vlv-companion-*.apk
+            *.deb
           generate_release_notes: true
