@@ -623,6 +623,15 @@ impl App {
                 self.state.config.tile_url_template = Some(template);
                 self.send(UiRequest::SaveConfig(self.state.config.clone()));
             }
+            DashboardAction::SetEv(is_ev) => {
+                self.state
+                    .config
+                    .vehicle_prefs
+                    .entry(vin.to_uppercase())
+                    .or_default()
+                    .is_ev = is_ev;
+                self.send(UiRequest::SaveConfig(self.state.config.clone()));
+            }
         }
     }
 }

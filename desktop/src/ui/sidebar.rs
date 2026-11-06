@@ -28,7 +28,15 @@ pub fn show(ui: &mut Ui, state: &AppState) -> Option<SidebarAction> {
         }
         for vin in state.garage.iter().filter_map(|v| v.vin.as_deref()) {
             let selected = state.selected_vin.as_deref() == Some(vin);
-            let label = vehicle_label(&state.config, &state.vehicles, vin);
+            let mut label = vehicle_label(&state.config, &state.vehicles, vin);
+            if state
+                .config
+                .vehicle_prefs
+                .get(&vin.to_uppercase())
+                .is_some_and(|p| p.is_ev)
+            {
+                label.push_str("  ·  EV");
+            }
             let r = ui.add_sized(
                 [ui.available_width(), 32.0],
                 egui::Button::selectable(selected, label),

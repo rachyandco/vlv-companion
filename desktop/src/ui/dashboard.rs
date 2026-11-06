@@ -113,6 +113,8 @@ pub enum DashboardAction {
     OpenInMaps(f64, f64),
     OpenStation(f64, f64),
     SetTileTemplate(String),
+    /// The EV tag in the header was toggled; persist `is_ev` for this car.
+    SetEv(bool),
 }
 
 /// What the command bar needs beyond the vehicle data, kept by the app.
@@ -143,7 +145,7 @@ pub fn show(
         .get(&vin.to_uppercase())
         .is_some_and(|p| p.is_ev);
 
-    header(ui, label, data, is_ev);
+    header(ui, label, data, is_ev, &mut actions);
     ui.add_space(GAP);
 
     let Some(d) = data.filter(|d| d.last_updated.is_some()) else {
@@ -238,10 +240,22 @@ pub fn show(
     actions
 }
 
-/// Title, model line and "colour · gearbox · availability · engine · updated".
-fn header(ui: &mut Ui, label: &str, data: Option<&VehicleData>, is_ev: bool) {
+/// Title with the EV tag, model line and
+/// "colour · gearbox · availability · engine · updated".
+fn header(
+    ui: &mut Ui,
+    label: &str,
+    data: Option<&VehicleData>,
+    is_ev: bool,
+    actions: &mut Vec<DashboardAction>,
+) {
     ui.add_space(12.0);
-    ui.label(RichText::new(label).size(24.0).strong());
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(label).size(24.0).strong());
+        if ev_tag(ui, is_ev) {
+            actions.push(DashboardAction::SetEv(!is_ev));
+        }
+    });
     let details = data.and_then(|d| d.details.as_ref());
     if let Some(line) = details.and_then(model_line) {
         if line != label {
@@ -274,6 +288,31 @@ fn header(ui: &mut Ui, label: &str, data: Option<&VehicleData>, is_ev: bool) {
     if !parts.is_empty() {
         ui.label(muted(parts.join("  ·  ")).size(14.0));
     }
+}
+
+/// The phone's "Electric vehicle" toggle as a small tag next to the title:
+/// filled green when on, outlined when off. Returns true when clicked.
+fn ev_tag(ui: &mut Ui, is_ev: bool) -> bool {
+    let (fill, stroke, text) = if is_ev {
+        (
+            Colors::GREEN.gamma_multiply(0.25),
+            Colors::GREEN.gamma_multiply(0.7),
+            Colors::GREEN,
+        )
+    } else {
+        (Color32::TRANSPARENT, Colors::CARD_BORDER, Colors::DIM)
+    };
+    let button = egui::Button::new(RichText::new("EV").size(12.0).strong().color(text))
+        .fill(fill)
+        .stroke(Stroke::new(1.0, stroke))
+        .corner_radius(CornerRadius::same(8));
+    ui.add(button)
+        .on_hover_text(if is_ev {
+            "Electric vehicle: fuel and engine controls are hidden. Click to turn off."
+        } else {
+            "Click to mark this car as electric and hide fuel and engine controls."
+        })
+        .clicked()
 }
 
 fn energy_number(f: Option<&EnergyField<serde_json::Value>>) -> Option<f64> {
