@@ -147,9 +147,10 @@ Decisions here are the owner's where stated, otherwise my calls.
   hand-written from the generated TypeScript types for only the fields the
   UI shows, with `#[serde(default)]` everywhere so unknown or missing fields
   never break parsing.
-- **OAuth (my call):** `oauth2` crate, authorization-code + PKCE S256, client
-  secret sent as HTTP Basic (what Keycloak accepts, as verified on the
-  phone), same Keycloak endpoints as `src/auth/config.ts`, same default scope
+- **OAuth (my call):** implemented directly on `reqwest` (no OAuth crate, so
+  no version coupling and the logic matches the phone line for line):
+  authorization-code + PKCE S256, client secret sent as HTTP Basic (what
+  Keycloak accepts, as verified on the phone), same Keycloak endpoints as `src/auth/config.ts`, same default scope
   list (no `offline_access`), same `nonce` and `state` checks, same refusal
   of `dc-` client ids with the same wording.
 - **Map tiles (my call):** raster tiles through a tile URL template in
