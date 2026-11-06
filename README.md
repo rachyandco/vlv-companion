@@ -111,7 +111,7 @@ Tap **Connect Volvo account** — this opens your system browser for Volvo's log
 
 You can edit any of these later under the **Settings** tab. Changing the OAuth client/secret/VCC-API-Key automatically signs you out so the next sign-in uses the new credentials cleanly.
 
-Volvo ID does not grant third-party apps the `offline_access` scope, so the refresh token's lifetime follows Volvo's session policy rather than being unlimited. When it lapses the app signs you out and the Garage shows a session-expired message; tap **Reconnect** to sign in again.
+Volvo ID does not grant third-party apps the `offline_access` scope, so the refresh token's lifetime follows Volvo's session policy rather than being unlimited. When it lapses the app signs you out and the Garage shows a session-expired message; tap **Reconnect** to sign in again. In practice the session lasts about 30 minutes without use (observed November 2026), so expect to reconnect after leaving the app idle for longer.
 
 ## Continuous Integration
 
@@ -151,7 +151,7 @@ Every read endpoint of the three APIs is covered; the deprecated Energy v1 `rech
 - **OAuth fails with `invalid_request` before the password prompt** — your developer-portal application is **unpublished**, or the redirect URI registered there does not match what's saved in the app (trailing slash and scheme matter).
 - **Sign-in succeeds but Garage shows "No vehicles linked"** — the OAuth flow re-used a cached Volvo session whose consent has 0 vehicles selected. Tap **Reconnect** on the Garage screen — it sends `prompt=login` so Volvo re-prompts for password and the vehicle-picker. If Volvo still skips the picker, sign out of `auth.volvocars.com` in your default browser, or revoke this app at <https://www.volvocars.com/intl/v/your-volvo> → connected apps, then reconnect.
 - **401 immediately after changing credentials** — older tokens are bound to the previous client. Settings auto-signs-out on credential change.
-- **"Your session expired" after the app sat idle** — the refresh token reached the end of Volvo ID's session lifetime (see *Configure at runtime*). Tap **Reconnect**; nothing is misconfigured.
+- **"Your session expired" after the app sat idle** — the refresh token reached the end of Volvo ID's session lifetime (about 30 minutes without use; see *Configure at runtime*). Tap **Reconnect**; nothing is misconfigured.
 - **Tyre cells say "—" or "No sensor"** — Volvo returns `UNSPECIFIED` / `NO_SENSOR` when the car hasn't pushed a fresh TPMS reading lately. Driving the car (or unlocking it) usually wakes the sensors. If it persists across drives, your model only exposes aggregate warnings, not per-corner pressures.
 
 ## License

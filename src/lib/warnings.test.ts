@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeWarnings, describeWarning, humanizeKey } from "./warnings";
+import { activeWarnings, describeWarning, hasAnyOk, humanizeKey } from "./warnings";
 
 const f = (value: string) => ({ value, updatedAt: "2026-11-06T00:00:00Z" });
 
@@ -37,5 +37,18 @@ describe("activeWarnings", () => {
   });
   it("is empty for undefined input", () => {
     expect(activeWarnings(undefined)).toEqual([]);
+  });
+  it("is empty when every entry is NO_WARNING", () => {
+    expect(activeWarnings({ brakeLightCenterWarning: f("NO_WARNING"), lowBeamLeftWarning: f("NO_WARNING"), hazardLightsWarning: f("no_warning") })).toEqual([]);
+  });
+});
+
+describe("hasAnyOk", () => {
+  it("is true when at least one entry is NO_WARNING", () => {
+    expect(hasAnyOk({ brakeLightCenterWarning: f("NO_WARNING"), lowBeamLeftWarning: f("UNSPECIFIED") })).toBe(true);
+  });
+  it("is false for all UNSPECIFIED and for undefined", () => {
+    expect(hasAnyOk({ brakeLightCenterWarning: f("UNSPECIFIED"), lowBeamLeftWarning: f("UNSPECIFIED") })).toBe(false);
+    expect(hasAnyOk(undefined)).toBe(false);
   });
 });

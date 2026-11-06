@@ -7,7 +7,9 @@ const OPEN_STATES = new Set(["OPEN", "AJAR"]);
 
 function isOpen(field: ResourceInstanceString | undefined): boolean | undefined {
   if (!field) return undefined;
-  return OPEN_STATES.has(field.value.toUpperCase());
+  const value = field.value.toUpperCase();
+  if (value === "UNSPECIFIED") return undefined;
+  return OPEN_STATES.has(value);
 }
 
 function fill(open: boolean | undefined): string {
@@ -54,10 +56,10 @@ export function CarTopView({ doors, windows, width = 260, isEV }: Props): JSX.El
           <Rect x={448} y={510} width={120} height={155} rx={18} fill={fill(isOpen(doors?.rearRightDoor))} />
           {/* Window overlays (drawn over the doors) */}
           <Rect x={40} y={370} width={80} height={100} rx={12} fill={fill(isOpen(windows?.frontLeftWindow))} />
-          <Rect x={468} y={370} width={80} height={100} fill={fill(isOpen(windows?.frontRightWindow))} />
-          <Rect x={40} y={525} width={80} height={110} fill={fill(isOpen(windows?.rearLeftWindow))} />
-          <Rect x={468} y={525} width={80} height={110} fill={fill(isOpen(windows?.rearRightWindow))} />
-          {windows?.sunroof ? (
+          <Rect x={468} y={370} width={80} height={100} rx={12} fill={fill(isOpen(windows?.frontRightWindow))} />
+          <Rect x={40} y={525} width={80} height={110} rx={12} fill={fill(isOpen(windows?.rearLeftWindow))} />
+          <Rect x={468} y={525} width={80} height={110} rx={12} fill={fill(isOpen(windows?.rearRightWindow))} />
+          {windows?.sunroof && windows.sunroof.value.toUpperCase() !== "UNSPECIFIED" ? (
             <Rect x={190} y={330} width={208} height={120} rx={20} fill={fill(isOpen(windows.sunroof))} />
           ) : null}
           {/* Tank lid (left side on this car) — hidden on EVs */}

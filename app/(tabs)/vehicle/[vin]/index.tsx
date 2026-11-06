@@ -21,7 +21,7 @@ import {
   useWindows,
 } from "@/hooks/useVehicle";
 import { engineLabel } from "@/lib/engine";
-import { activeWarnings, describeWarning } from "@/lib/warnings";
+import { activeWarnings, describeWarning, hasAnyOk } from "@/lib/warnings";
 import { useEnergyState } from "@/hooks/useEnergy";
 import { useVehiclePrefs } from "@/hooks/useVehiclePrefs";
 import { useVin } from "@/hooks/useVin";
@@ -114,7 +114,7 @@ export default function OverviewScreen(): JSX.Element {
         <Text style={styles.headerSub}>
           {v ? `${v.externalColour ?? ""} · ${v.gearbox ?? ""}` : ""}
           {reachable ? `  ·  ${reachable}` : ""}
-          {engineText ? `  ·  ${engineText}` : ""}
+          {engineText && !isEV ? `  ·  ${engineText}` : ""}
         </Text>
       </View>
 
@@ -150,7 +150,11 @@ export default function OverviewScreen(): JSX.Element {
             <StatusTile key={w.key} label={w.label} value={w.text} valueColor="#fbe2b3" />
           ))}
           {warnings.isSuccess && warningList.length === 0 ? (
-            <StatusTile label="Lights" value="No warnings" valueColor="#86efac" />
+            hasAnyOk(warnings.data?.data) ? (
+              <StatusTile label="Lights" value="No warnings" valueColor="#86efac" />
+            ) : (
+              <StatusTile label="Lights" value="—" />
+            )
           ) : null}
         </View>
       </View>
@@ -162,7 +166,9 @@ export default function OverviewScreen(): JSX.Element {
             <StatusTile label="Trip meter 1" value={renderResource(stats.tripMeter1)} />
             <StatusTile label="Trip meter 2" value={renderResource(stats.tripMeter2)} />
             <StatusTile label="Average speed" value={renderResource(stats.averageSpeed)} />
-            <StatusTile label="Fuel consumption" value={renderResource(stats.averageFuelConsumption)} />
+            {isEV ? null : (
+              <StatusTile label="Fuel consumption" value={renderResource(stats.averageFuelConsumption)} />
+            )}
             <StatusTile label="Distance to empty" value={renderResource(stats.distanceToEmpty)} />
           </View>
         </View>

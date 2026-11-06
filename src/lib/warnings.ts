@@ -35,3 +35,8 @@ export function activeWarnings(
     return level === "warn" ? [{ key, label: humanizeKey(key), text }] : [];
   });
 }
+
+export function hasAnyOk(warnings: ExteriorWarnings | undefined): boolean {
+  if (!warnings) return false;
+  return Object.values(warnings).some((field) => describeWarning(field).level === "ok");
+}
