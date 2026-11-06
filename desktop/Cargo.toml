@@ -1,0 +1,44 @@
+[package]
+name = "vlv-companion-desktop"
+version = "1.0.2"
+edition = "2021"
+description = "Linux desktop client for the Volvo Cars public API"
+license = "GPL-3.0-or-later"
+publish = false
+
+[[bin]]
+name = "vlv-companion"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.37.0"
+egui = "0.37.0"
+egui_extras = { version = "0.37.0", features = ["image"] }
+walkers = "0.65.0"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+sha2 = "0.11"
+base64 = "0.23"
+rand = "0.10"
+directories = "6"
+chrono = "0.4"
+thiserror = "2"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[package.metadata.deb]
+name = "vlv-companion"
+maintainer = "rachyandco"
+copyright = "2026, rachyandco. GPL-3.0-or-later"
+license-file = ["../LICENSE", "0"]
+extended-description = "Degoogled-friendly Linux client for the Volvo Cars public API. Independent project, not affiliated with Volvo Car Corporation."
+section = "utils"
+priority = "optional"
+depends = "libxkbcommon0, libgl1, libwayland-client0, libx11-6, libxcursor1, libxi6, libxrandr2, libfontconfig1, xdg-utils"
+assets = [
+  ["target/release/vlv-companion", "usr/bin/", "755"],
+  ["packaging/vlv-companion.desktop", "usr/share/applications/", "644"],
+  ["packaging/icon-256.png", "usr/share/icons/hicolor/256x256/apps/vlv-companion.png", "644"],
+]
