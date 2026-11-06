@@ -8,12 +8,20 @@ import { TyreStatus } from "@/components/TyreStatus";
 import {
   useCommandAccessibility,
   useDiagnostics,
+  useBrakes,
   useDoors,
+  useEngineDiagnostics,
+  useEngineStatus,
   useFuel,
   useOdometer,
+  useStatistics,
   useTyres,
   useVehicle,
+  useWarnings,
+  useWindows,
 } from "@/hooks/useVehicle";
+import { engineLabel } from "@/lib/engine";
+import { activeWarnings, describeWarning } from "@/lib/warnings";
 import { useEnergyState } from "@/hooks/useEnergy";
 import { useVehiclePrefs } from "@/hooks/useVehiclePrefs";
 import { useVin } from "@/hooks/useVin";
@@ -29,6 +37,12 @@ export default function OverviewScreen(): JSX.Element {
   const access = useCommandAccessibility(vin);
   const diagnostics = useDiagnostics(vin);
   const tyres = useTyres(vin);
+  const windows = useWindows(vin);
+  const engineStatus = useEngineStatus(vin);
+  const engineDiag = useEngineDiagnostics(vin);
+  const brakes = useBrakes(vin);
+  const warnings = useWarnings(vin);
+  const statistics = useStatistics(vin);
 
   const refreshing =
     vehicle.isRefetching ||
@@ -37,7 +51,13 @@ export default function OverviewScreen(): JSX.Element {
     fuel.isRefetching ||
     energy.isRefetching ||
     diagnostics.isRefetching ||
-    tyres.isRefetching;
+    tyres.isRefetching ||
+    windows.isRefetching ||
+    engineStatus.isRefetching ||
+    engineDiag.isRefetching ||
+    brakes.isRefetching ||
+    warnings.isRefetching ||
+    statistics.isRefetching;
 
   const refetchAll = () => {
     void vehicle.refetch();
@@ -48,6 +68,12 @@ export default function OverviewScreen(): JSX.Element {
     void access.refetch();
     void diagnostics.refetch();
     void tyres.refetch();
+    void windows.refetch();
+    void engineStatus.refetch();
+    void engineDiag.refetch();
+    void brakes.refetch();
+    void warnings.refetch();
+    void statistics.refetch();
   };
 
   if (vehicle.isLoading) {
@@ -65,6 +91,16 @@ export default function OverviewScreen(): JSX.Element {
   const socField = energy.data?.batteryChargeLevel;
   const rangeField = energy.data?.electricRange;
   const reachable = access.data?.data.availabilityStatus?.value;
+  const engineText = engineLabel(engineStatus.data?.data.engineStatus);
+  const stats = statistics.data?.data;
+  const healthTiles = [
+    { label: "Oil level", field: engineDiag.data?.data.oilLevelWarning },
+    { label: "Coolant level", field: engineDiag.data?.data.engineCoolantLevelWarning },
+    { label: "Brake fluid", field: brakes.data?.data.brakeFluidLevelWarning },
+  ];
+  const levelColor = (level: "ok" | "warn" | "unknown") =>
+    level === "ok" ? "#86efac" : level === "warn" ? "#fbe2b3" : undefined;
+  const warningList = activeWarnings(warnings.data?.data);
 
   return (
     <ScrollView
@@ -78,6 +114,7 @@ export default function OverviewScreen(): JSX.Element {
         <Text style={styles.headerSub}>
           {v ? `${v.externalColour ?? ""} · ${v.gearbox ?? ""}` : ""}
           {reachable ? `  ·  ${reachable}` : ""}
+          {engineText ? `  ·  ${engineText}` : ""}
         </Text>
       </View>
 
@@ -98,9 +135,38 @@ export default function OverviewScreen(): JSX.Element {
         ) : null}
       </View>
 
-      <CarTopView doors={doors.data?.data} isEV={isEV} />
+      <CarTopView doors={doors.data?.data} windows={windows.data?.data} isEV={isEV} />
 
       <TyreStatus tyres={tyres.data?.data} />
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Health</Text>
+        <View style={styles.grid}>
+          {healthTiles.map(({ label, field }) => {
+            const d = describeWarning(field);
+            return <StatusTile key={label} label={label} value={d.text} valueColor={levelColor(d.level)} />;
+          })}
+          {warningList.map((w) => (
+            <StatusTile key={w.key} label={w.label} value={w.text} valueColor="#fbe2b3" />
+          ))}
+          {warnings.isSuccess && warningList.length === 0 ? (
+            <StatusTile label="Lights" value="No warnings" valueColor="#86efac" />
+          ) : null}
+        </View>
+      </View>
+
+      {stats ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Trip</Text>
+          <View style={styles.grid}>
+            <StatusTile label="Trip meter 1" value={renderResource(stats.tripMeter1)} />
+            <StatusTile label="Trip meter 2" value={renderResource(stats.tripMeter2)} />
+            <StatusTile label="Average speed" value={renderResource(stats.averageSpeed)} />
+            <StatusTile label="Fuel consumption" value={renderResource(stats.averageFuelConsumption)} />
+            <StatusTile label="Distance to empty" value={renderResource(stats.distanceToEmpty)} />
+          </View>
+        </View>
+      ) : null}
     </ScrollView>
   );
 }
@@ -111,5 +177,12 @@ const styles = StyleSheet.create({
   header: { gap: 4 },
   headerTitle: { color: "#e8eaed", fontSize: 22, fontWeight: "700" },
   headerSub: { color: "#bdc1c6", fontSize: 14 },
+  section: { gap: 8 },
+  sectionTitle: {
+    color: "#bdc1c6",
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
 });
