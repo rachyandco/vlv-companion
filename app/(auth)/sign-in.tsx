@@ -3,6 +3,7 @@ import { Alert, Linking, ScrollView, Share, StyleSheet, Text, View } from "react
 
 import { useAuth } from "@/auth/AuthProvider";
 import { DEFAULT_REDIRECT_URI, DEFAULT_SCOPES } from "@/auth/config";
+import { isLegacyClientId } from "@/auth/migration";
 import { CommandButton } from "@/components/CommandButton";
 import { CredentialFields, type CredentialValues } from "@/components/CredentialFields";
 import { getRuntimeConfig, setRuntimeConfig } from "@/lib/runtimeConfig";
@@ -92,6 +93,18 @@ export default function SignInScreen(): JSX.Element {
       </View>
 
       <CredentialFields values={values} onChange={(patch) => setValues((v) => ({ ...v, ...patch }))} />
+
+      {isLegacyClientId(values.clientId) ? (
+        <View style={styles.warning}>
+          <Text style={styles.warningTitle}>This client id belongs to the retired Volvo ID service</Text>
+          <Text style={styles.warningBody}>
+            Volvo moved Volvo ID to a new sign-in service and applications whose client id starts with{" "}
+            <Text style={styles.code}>dc-</Text> no longer work. Create a new application on
+            developer.volvocars.com with the same redirect URI and scopes, then paste its{" "}
+            <Text style={styles.code}>vid-</Text> client id and new client secret above.
+          </Text>
+        </View>
+      ) : null}
 
       {usingDefaultRedirect(values.redirectUri) ? (
         <View style={styles.warning}>

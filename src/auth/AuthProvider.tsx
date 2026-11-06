@@ -15,8 +15,9 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { DEEP_LINK_URI as DEEP_LINK, VOLVO_OAUTH, type StoredTokens } from "./config";
 import { clearTokens, loadTokens, saveTokens } from "./storage";
+import { isLegacyClientId } from "./migration";
 import { SessionExpiredError } from "./sessionError";
-import { getRuntimeConfig } from "@/lib/runtimeConfig";
+import { getRuntimeConfig, migrateRuntimeConfig } from "@/lib/runtimeConfig";
 import { randomHex } from "@/api/trace";
 
 WebBrowser.maybeCompleteAuthSession();
@@ -72,7 +73,14 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
 
   useEffect(() => {
     void (async () => {
-      const tokens = await loadTokens();
+      // Bring stored settings in line with the current Volvo ID service
+      // before trusting any cached token: tokens issued by the retired
+      // PingFederate service (dc- clients) can't be refreshed against
+      // Keycloak, so drop them and route to the sign-in screen instead of
+      // dying on the first refresh.
+      const { legacyClient } = await migrateRuntimeConfig();
+      const tokens = legacyClient ? null : await loadTokens();
+      if (legacyClient) await clearTokens();
       tokensRef.current = tokens ?? null;
       setState(tokens ? { status: "signed-in", tokens } : { status: "signed-out" });
     })();
@@ -108,6 +116,13 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     if (!clientId) {
       throw new Error("OAuth client_id is not set. Add it in Settings.");
     }
+    if (isLegacyClientId(clientId)) {
+      throw new Error(
+        "This OAuth client id starts with \"dc-\", which belongs to the retired Volvo ID service. " +
+          "Create a new application on developer.volvocars.com (its client id starts with \"vid-\") " +
+          "and enter the new client id and secret.",
+      );
+    }
     if (!redirectUri) {
       throw new Error("Redirect URI is not set. Add it in Settings.");
     }
@@ -115,8 +130,8 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     if (scopes.length === 0) {
       throw new Error("No OAuth scopes configured.");
     }
-    // OIDC ("openid" scope) flows require nonce on many CIAMs (incl. Ping,
-    // which is what Volvo's volvoid endpoint uses). Generate one alongside PKCE.
+    // OIDC ("openid" scope) flows require a nonce; Keycloak echoes it back in
+    // the id_token so we can verify it. Generate one alongside PKCE.
     const nonce = randomHex(16);
     const extraParams: Record<string, string> = { nonce };
     if (options?.prompt) extraParams.prompt = options.prompt;
@@ -186,8 +201,8 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     // OIDC core 3.1.3.7: when an id_token is returned for an "openid" auth
     // request, its `nonce` claim must match the value we sent. We enforce this
     // strictly when the claim is present (replay protection), but tolerate its
-    // absence — Volvo's Ping CIAM does not always propagate the nonce into the
-    // id_token, and PKCE + state already cover the bulk of the threat model.
+    // absence — PKCE + state already cover the bulk of the threat model, and
+    // the retired PingFederate service did not always propagate it.
     if (tokenResult.idToken) {
       const idTokenNonce = readJwtNonce(tokenResult.idToken);
       if (idTokenNonce !== null && idTokenNonce !== nonce) {

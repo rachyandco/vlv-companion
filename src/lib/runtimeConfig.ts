@@ -1,4 +1,5 @@
 import { DEFAULT_REDIRECT_URI, DEFAULT_SCOPES } from "@/auth/config";
+import { isLegacyClientId } from "@/auth/migration";
 import {
   getRuntimeClientId,
   getRuntimeClientSecret,
@@ -54,4 +55,14 @@ export async function setRuntimeConfig(next: Partial<RuntimeConfig>): Promise<vo
   if (next.vccApiKey !== undefined) await setRuntimeVccApiKey(next.vccApiKey);
   if (next.redirectUri !== undefined) await setRuntimeRedirectUri(next.redirectUri);
   if (next.scopes !== undefined) await setRuntimeScopes(next.scopes);
+}
+
+/**
+ * Runs on every launch before the auth state is derived. Reports whether the
+ * stored client id is a retired `dc-` one (pre-Keycloak Volvo ID) so the
+ * caller can drop tokens that the new service would refuse to refresh.
+ */
+export async function migrateRuntimeConfig(): Promise<{ legacyClient: boolean }> {
+  const storedClientId = await getRuntimeClientId();
+  return { legacyClient: isLegacyClientId(storedClientId ?? "") };
 }

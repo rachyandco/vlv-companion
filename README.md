@@ -6,7 +6,7 @@ A degoogled-friendly **React Native Android** client for the [Volvo Cars public 
 
 ## Features
 
-- OAuth 2.0 + PKCE sign-in against Volvo ID (EU region), confidential-client.
+- OAuth 2.0 + PKCE sign-in against Volvo ID (Keycloak, `auth.volvocars.com`), confidential-client.
 - Garage list with per-vehicle name + EV toggle (hides fuel UI on BEVs).
 - Per-vehicle screens:
   - **Overview** — central lock, battery %, electric range, odometer, fuel (ICE only), service distance, doors top-view, **per-corner tyre pressure**.
@@ -43,9 +43,11 @@ Confirm the pairing worked: at <https://www.volvocars.com/>, the car must appear
 3. Fill in:
    - **Name** — anything.
    - **Redirect URI** — you need an HTTPS bridge that re-deeplinks back into the app, because the Volvo developer portal does not accept custom-scheme URIs. Host the static page at [`redirect/index.html`](redirect/index.html) on any HTTPS endpoint (Cloudflare Pages, GitHub Pages, Vercel, Netlify) and use that URL here. The page receives `?code=&state=` from Volvo and 302s to `volvo-companion://oauth/callback?…` so the app's intent-filter catches the response.
-   - **Scopes** — request all `conve:*`, all `energy:*`, and `location:read`. The full list this app uses is in [`src/auth/config.ts`](src/auth/config.ts) (`DEFAULT_SCOPES`).
-4. Click **Publish**, and take note of the **client id**, **client secret**.
+   - **Scopes** — request all `conve:*`, all `energy:*`, and `location:read`. The full list this app uses is in [`src/auth/config.ts`](src/auth/config.ts) (`DEFAULT_SCOPES`). Do **not** add `offline_access`: the portal does not grant it to third-party apps and Volvo ID rejects the whole sign-in with `invalid_scope` if it is requested.
+4. Click **Publish**, and take note of the **client id** (it starts with `vid-`), **client secret**.
 5. From the application page note the **VCC API Key**. The VCC-API-Key is a separate header credential, not the OAuth secret — make sure you copy both.
+
+> **Already have an application whose client id starts with `dc-`?** Volvo moved Volvo ID to a new identity service (Keycloak at `auth.volvocars.com`) and retired the old one (`volvoid.eu.volvocars.com`). `dc-` clients are rejected by the new service and the old one shuts down on **31 January 2027**. Create a new application as above with the same redirect URI and scopes, then enter its `vid-` client id and new secret on the sign-in screen. Everything else carries over: the redirect bridge is unchanged and the VCC API key from the old application keeps working with the new client (verified), though the portal also issues a new one. The app detects a `dc-` client id on launch, signs you out, and shows a warning above the Connect button until you replace it. Details: <https://developer.volvocars.com/news/volvoid-migration/> (portal login required).
 
 ### 3. (One-time) host the redirect bridge
 
@@ -109,6 +111,8 @@ Tap **Connect Volvo account** — this opens your system browser for Volvo's log
 
 You can edit any of these later under the **Settings** tab. Changing the OAuth client/secret/VCC-API-Key automatically signs you out so the next sign-in uses the new credentials cleanly.
 
+Volvo ID does not grant third-party apps the `offline_access` scope, so the refresh token's lifetime follows Volvo's session policy rather than being unlimited. When it lapses the app signs you out and the Garage shows a session-expired message; tap **Reconnect** to sign in again.
+
 ## Continuous Integration
 
 `.github/workflows/release.yml` builds a release APK whenever you push a tag matching `v*`:
@@ -140,9 +144,12 @@ The workflow installs JDK 17 + Android SDK 35 + NDK 27.1, runs `pnpm install`, `
 ## Troubleshooting
 
 - **"OAuth client_id is not set" on Reconnect** — open Settings, fill in the credentials, save (this also signs you out if you were already signed in).
+- **"This OAuth client id starts with dc-"** — your developer-portal application predates Volvo's identity-service migration. Create a new one (see the migration note in step 2) and enter the new `vid-` client id and secret.
+- **`invalid_scope: Invalid scopes: …` before the password prompt** — Volvo ID lists the whole request when any single scope is not enabled for your application. Compare the Scopes field with the scopes ticked in the portal; `offline_access` in particular is never granted.
 - **OAuth fails with `invalid_request` before the password prompt** — your developer-portal application is **unpublished**, or the redirect URI registered there does not match what's saved in the app (trailing slash and scheme matter).
-- **Sign-in succeeds but Garage shows "No vehicles linked"** — the OAuth flow re-used a cached Volvo session whose consent has 0 vehicles selected. Tap **Reconnect** on the Garage screen — it sends `prompt=login` so Volvo re-prompts for password and the vehicle-picker. If Volvo still skips the picker, sign out of `volvoid.eu.volvocars.com` in your default browser, or revoke this app at <https://www.volvocars.com/intl/v/your-volvo> → connected apps, then reconnect.
+- **Sign-in succeeds but Garage shows "No vehicles linked"** — the OAuth flow re-used a cached Volvo session whose consent has 0 vehicles selected. Tap **Reconnect** on the Garage screen — it sends `prompt=login` so Volvo re-prompts for password and the vehicle-picker. If Volvo still skips the picker, sign out of `auth.volvocars.com` in your default browser, or revoke this app at <https://www.volvocars.com/intl/v/your-volvo> → connected apps, then reconnect.
 - **401 immediately after changing credentials** — older tokens are bound to the previous client. Settings auto-signs-out on credential change.
+- **"Your session expired" after the app sat idle** — the refresh token reached the end of Volvo ID's session lifetime (see *Configure at runtime*). Tap **Reconnect**; nothing is misconfigured.
 - **Tyre cells say "—" or "No sensor"** — Volvo returns `UNSPECIFIED` / `NO_SENSOR` when the car hasn't pushed a fresh TPMS reading lately. Driving the car (or unlocking it) usually wakes the sensors. If it persists across drives, your model only exposes aggregate warnings, not per-corner pressures.
 
 ## License
