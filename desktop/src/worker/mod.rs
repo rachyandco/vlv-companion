@@ -174,6 +174,7 @@ impl Worker {
             // Tell the UI its state even when the network is down, then keep
             // the session alive straight away and load the vehicles.
             self.emit(WorkerEvent::SignedIn);
+            self.emit_climate_state();
             self.keepalive().await;
             self.load_garage().await;
         }
@@ -272,6 +273,7 @@ impl Worker {
             Ok(()) => {
                 self.keepalive_retry_at = None;
                 self.emit(WorkerEvent::SignedIn);
+                self.emit_climate_state();
                 self.load_garage().await;
             }
             Err(e) => {
@@ -497,6 +499,23 @@ impl Worker {
             tokio::time::sleep(POST_COMMAND_REFRESH).await;
             let _ = tx.send(Msg::DelayedRefresh(vin));
         });
+    }
+
+    /// Tells the UI about climatisation starts still within their cycle.
+    fn emit_climate_state(&mut self) {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let Some(tokens) = self.session.tokens.as_mut() else {
+            return;
+        };
+        climate::purge(&mut tokens.climate_started_at, now_ms);
+        let entries: Vec<(String, i64)> = tokens
+            .climate_started_at
+            .iter()
+            .map(|(v, t)| (v.clone(), *t))
+            .collect();
+        for (vin, at_ms) in entries {
+            self.emit(WorkerEvent::ClimateState { vin, at_ms });
+        }
     }
 
     fn climate_bookkeeping(&mut self, vin: &str, command: CommandName) {

@@ -1,18 +1,18 @@
 //! The eframe application: drains worker events into `AppState`, tracks
 //! activity, and draws the sidebar plus the current screen.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use egui::{Ui, Vec2};
 
-use crate::api::commands::{friendly_message, Bucket};
-use crate::api::models::VehicleListItem;
+use crate::api::commands::{friendly_message, Bucket, CommandName};
+use crate::api::models::{CommandListItem, VehicleListItem};
 use crate::config::Config;
 use crate::state::schedule::Activity;
-use crate::ui::dashboard::{self, DashboardAction, DashboardState};
+use crate::ui::dashboard::{self, CommandInputs, DashboardAction, DashboardState};
 use crate::ui::data::VehicleData;
 use crate::ui::map::distance_km;
 use crate::ui::settings::{self, SettingsAction, SettingsDraft};
@@ -26,7 +26,7 @@ const ACTIVITY_RESEND: Duration = Duration::from_secs(10);
 const TICK: Duration = Duration::from_secs(1);
 const CONTENT_WIDTH: f32 = 720.0;
 /// The dashboard lays cards side by side, so it gets a wider column.
-const DASHBOARD_WIDTH: f32 = 1100.0;
+const DASHBOARD_WIDTH: f32 = 1160.0;
 const CALLBACK_SCHEME: &str = "volvo-companion://";
 /// The charger overlay is fetched again once the car moved this far (km).
 const CHARGERS_REFETCH_KM: f64 = 0.2;
@@ -66,6 +66,63 @@ pub struct App {
     /// (last_input, focused, minimised) as last sent, and when.
     activity: Activity,
     activity_sent: Option<(Activity, Instant)>,
+    /// Epoch ms of each car's last accepted climatisation start.
+    climate_started: HashMap<String, i64>,
+    /// `VLV_DEMO=1`: commands are answered locally, not sent.
+    demo: bool,
+}
+
+/// What the UI does with a command's answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandOutcome {
+    /// Button tint: `Some(true)` green, `Some(false)` red.
+    pub flash: Option<bool>,
+    /// New value of the sticky privacy banner, when it changes.
+    pub privacy_blocked: Option<bool>,
+    pub banner: Option<(Level, String)>,
+}
+
+/// The phone's rules: privacy mode becomes the sticky banner (no flash, no
+/// alert); accepted commands flash green and clear it; an empty-body 2xx
+/// (`UNKNOWN`) is treated as accepted with a note; everything else flashes
+/// red with the friendly message.
+pub fn command_outcome(status: &str, message: Option<&str>, bucket: Bucket) -> CommandOutcome {
+    if status == "NOT_ALLOWED_PRIVACY_ENABLED" {
+        return CommandOutcome {
+            flash: None,
+            privacy_blocked: Some(true),
+            banner: None,
+        };
+    }
+    if status == "UNKNOWN" {
+        return CommandOutcome {
+            flash: Some(true),
+            privacy_blocked: Some(false),
+            banner: Some((Level::Info, "Sent — outcome unknown.".into())),
+        };
+    }
+    match bucket {
+        Bucket::Success | Bucket::Pending => CommandOutcome {
+            flash: Some(true),
+            privacy_blocked: Some(false),
+            banner: None,
+        },
+        Bucket::UserActionable | Bucket::Failure => CommandOutcome {
+            flash: Some(false),
+            privacy_blocked: None,
+            banner: Some((Level::Danger, friendly_message(status, message))),
+        },
+    }
+}
+
+/// The car's command list as a set; `None` when absent or with no known name.
+pub fn supported_commands(list: Option<&[CommandListItem]>) -> Option<HashSet<CommandName>> {
+    let set: HashSet<CommandName> = list?
+        .iter()
+        .filter_map(|i| i.command.as_deref())
+        .filter_map(CommandName::from_api_name)
+        .collect();
+    (!set.is_empty()).then_some(set)
 }
 
 impl App {
@@ -103,10 +160,13 @@ impl App {
                 minimised: false,
             },
             activity_sent: None,
+            climate_started: HashMap::new(),
+            demo: false,
         };
         #[cfg(debug_assertions)]
         if crate::demo::enabled() {
             crate::demo::seed(&mut app.state);
+            app.demo = true;
         }
         app
     }
@@ -142,6 +202,7 @@ impl App {
                 self.state.vehicles.clear();
                 self.state.garage.clear();
                 self.state.selected_vin = None;
+                self.climate_started.clear();
                 self.dashboard.set_stations(Vec::new());
                 self.chargers_at = None;
                 self.screen = Screen::Dashboard;
@@ -174,19 +235,35 @@ impl App {
                 status,
                 message,
                 bucket,
-                ..
+                ready_to_unlock_until,
             } => {
                 self.dashboard.finish_command(Some(&vin), command);
-                let level = match bucket {
-                    Bucket::Success | Bucket::Pending => Level::Info,
-                    Bucket::UserActionable => Level::Warn,
-                    Bucket::Failure => Level::Danger,
-                };
-                let text = friendly_message(&status, message.as_deref());
-                self.set_banner(level, format!("{}: {text}", command.label()));
+                // Flashes, the unlock window and privacy belong to the car on screen.
+                if self.state.selected_vin.as_deref() != Some(vin.as_str()) {
+                    return;
+                }
+                let out = command_outcome(&status, message.as_deref(), bucket);
+                let bar = &mut self.dashboard.commands;
+                if let Some(ok) = out.flash {
+                    bar.set_flash(command, ok, Instant::now());
+                }
+                if let Some(p) = out.privacy_blocked {
+                    bar.privacy_blocked = p;
+                }
+                if command == CommandName::Unlock && out.flash == Some(true) {
+                    if let Some(until) = ready_to_unlock_until {
+                        bar.unlock_until_ms = Some(until);
+                    }
+                }
+                if let Some((level, text)) = out.banner {
+                    self.set_banner(level, text);
+                }
             }
             WorkerEvent::CommandError { command, message } => {
                 self.dashboard.finish_command(None, command);
+                self.dashboard
+                    .commands
+                    .set_flash(command, false, Instant::now());
                 self.set_banner(Level::Danger, format!("{}: {message}", command.label()));
             }
             WorkerEvent::SessionExpired(msg) => {
@@ -198,8 +275,13 @@ impl App {
             WorkerEvent::Chargers(Err(msg)) => {
                 self.set_banner(Level::Warn, format!("EV chargers: {msg}"));
             }
-            // Drawn by the climate task.
-            WorkerEvent::ClimateStarted { .. } | WorkerEvent::ClimateStopped { .. } => {}
+            WorkerEvent::ClimateStarted { vin, at_ms }
+            | WorkerEvent::ClimateState { vin, at_ms } => {
+                self.climate_started.insert(vin, at_ms);
+            }
+            WorkerEvent::ClimateStopped { vin } => {
+                self.climate_started.remove(&vin);
+            }
         }
     }
 
@@ -395,6 +477,11 @@ impl App {
         );
         let label = vehicle_label(&self.state.config, &self.state.vehicles, &vin);
         let data = self.state.vehicles.get(&vin);
+        let supported = supported_commands(data.and_then(|d| d.command_list.as_deref()));
+        let inputs = CommandInputs {
+            supported: supported.as_ref(),
+            climate_started_ms: self.climate_started.get(&vin).copied(),
+        };
         let actions = dashboard::show(
             ui,
             &mut self.dashboard,
@@ -402,6 +489,7 @@ impl App {
             &vin,
             &label,
             data,
+            inputs,
         );
         for action in actions {
             self.on_dashboard(&vin, action);
@@ -435,6 +523,7 @@ impl App {
 
     fn on_dashboard(&mut self, vin: &str, action: DashboardAction) {
         match action {
+            DashboardAction::Command(command, _) if self.demo => self.demo_command(vin, command),
             DashboardAction::Command(command, runtime_minutes) => {
                 self.send(UiRequest::Command {
                     vin: vin.to_string(),
@@ -466,6 +555,29 @@ impl App {
                 self.state.config.tile_url_template = Some(template);
                 self.send(UiRequest::SaveConfig(self.state.config.clone()));
             }
+        }
+    }
+}
+
+impl App {
+    /// Demo mode: answers a command as the worker would on success.
+    fn demo_command(&mut self, vin: &str, command: CommandName) {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        self.on_event(WorkerEvent::CommandResult {
+            vin: vin.to_string(),
+            command,
+            status: "COMPLETED".into(),
+            message: None,
+            bucket: Bucket::Success,
+            ready_to_unlock_until: (command == CommandName::Unlock).then_some(now_ms + 30_000),
+        });
+        let vin = vin.to_string();
+        match command {
+            CommandName::ClimatizationStart => {
+                self.on_event(WorkerEvent::ClimateStarted { vin, at_ms: now_ms })
+            }
+            CommandName::ClimatizationStop => self.on_event(WorkerEvent::ClimateStopped { vin }),
+            _ => {}
         }
     }
 }
@@ -502,5 +614,67 @@ impl eframe::App for App {
         }
         egui::CentralPanel::default().show(ui, |ui| self.central(ui));
         ctx.request_repaint_after(TICK);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_outcomes_follow_the_phone() {
+        let ok = command_outcome("COMPLETED", None, Bucket::Success);
+        assert_eq!(
+            (ok.flash, ok.privacy_blocked, ok.banner),
+            (Some(true), Some(false), None)
+        );
+        let pending = command_outcome("WAITING", None, Bucket::Pending);
+        assert_eq!(pending.flash, Some(true));
+        assert!(pending.banner.is_none());
+
+        let privacy = command_outcome("NOT_ALLOWED_PRIVACY_ENABLED", None, Bucket::UserActionable);
+        assert_eq!(
+            (privacy.flash, privacy.privacy_blocked, privacy.banner),
+            (None, Some(true), None)
+        );
+
+        let door = command_outcome("UNABLE_TO_LOCK_DOOR_OPEN", None, Bucket::UserActionable);
+        assert_eq!(door.flash, Some(false));
+        assert_eq!(door.privacy_blocked, None);
+        assert_eq!(
+            door.banner,
+            Some((
+                Level::Danger,
+                "A door is open — close it and try again.".into()
+            ))
+        );
+        let other = command_outcome("WEIRD", Some("from api"), Bucket::Failure);
+        assert_eq!(other.banner, Some((Level::Danger, "from api".into())));
+
+        let unknown = command_outcome("UNKNOWN", None, Bucket::Failure);
+        assert_eq!(unknown.flash, Some(true));
+        assert_eq!(
+            unknown.banner,
+            Some((Level::Info, "Sent — outcome unknown.".into()))
+        );
+    }
+
+    #[test]
+    fn supported_set_from_command_list() {
+        assert_eq!(supported_commands(None), None);
+        assert_eq!(supported_commands(Some(&[])), None);
+        let item = |c: Option<&str>| CommandListItem {
+            command: c.map(str::to_string),
+        };
+        assert_eq!(
+            supported_commands(Some(&[item(Some("TELEPORT")), item(None)])),
+            None
+        );
+        let set =
+            supported_commands(Some(&[item(Some("LOCK")), item(Some("HONK_AND_FLASH"))])).unwrap();
+        assert_eq!(
+            set,
+            HashSet::from([CommandName::Lock, CommandName::HonkFlash])
+        );
     }
 }

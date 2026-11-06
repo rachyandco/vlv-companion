@@ -6,6 +6,7 @@ use crate::config::Config;
 
 pub mod car_view;
 pub mod cards;
+pub mod commands_bar;
 pub mod dashboard;
 pub mod data;
 pub mod energy;

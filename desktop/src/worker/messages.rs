@@ -72,4 +72,10 @@ pub enum WorkerEvent {
     ClimateStopped {
         vin: String,
     },
+    /// A climatisation start remembered from an earlier run, sent after
+    /// `SignedIn` so the UI can show its banner.
+    ClimateState {
+        vin: String,
+        at_ms: i64,
+    },
 }

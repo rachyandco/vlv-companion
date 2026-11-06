@@ -1,5 +1,7 @@
 //! Vehicle dashboard: header, status cards, car top view, tyres and map,
-//! then the energy, health and trip rows. Controls come in a later task.
+//! then the energy, health and trip rows, and the command bar.
+
+use std::collections::HashSet;
 
 use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, RichText, Stroke, Ui};
 
@@ -15,7 +17,7 @@ use crate::ui::data::VehicleData;
 use crate::ui::map::{MapPanel, MAP_HEIGHT};
 use crate::ui::model_line;
 use crate::ui::widgets::{muted, section_title};
-use crate::ui::{energy, health};
+use crate::ui::{commands_bar, energy, health};
 use crate::warnings::{engine_label, humanize_value};
 
 const GAP: f32 = 12.0;
@@ -33,9 +35,14 @@ pub struct DashboardState {
     car: Option<CarView>,
     /// VIN of an unlock waiting for the user's confirmation.
     confirm_unlock: Option<String>,
-    /// Lock or unlock sent and not answered yet: (VIN, command). While set,
-    /// the lock card ignores clicks, like the phone's `busy` flag.
+    /// Command sent and not answered yet: (VIN, command). While set, the
+    /// lock card and every command button ignore clicks, like the phone's
+    /// `busy` flag.
     pending: Option<(String, CommandName)>,
+    /// Command bar (flash, confirmations, unlock window, privacy).
+    pub commands: commands_bar::State,
+    /// Car the command bar state belongs to.
+    commands_vin: Option<String>,
     /// Map tiles, view and charger overlay.
     pub map: MapPanel,
     /// Chargers near the car from the last successful fetch.
@@ -66,9 +73,17 @@ impl DashboardState {
         self.map.selected_station = None;
     }
 
-    /// True while a lock or unlock for `vin` is in flight.
+    /// True while a command for `vin` is in flight.
     pub fn is_busy(&self, vin: &str) -> bool {
         self.pending.as_ref().is_some_and(|(v, _)| v == vin)
+    }
+
+    /// The command in flight for `vin`, if any.
+    pub fn busy_command(&self, vin: &str) -> Option<CommandName> {
+        self.pending
+            .as_ref()
+            .filter(|(v, _)| v == vin)
+            .map(|(_, c)| *c)
     }
 
     /// Drops the pending marker and any open confirmation that belong to
@@ -79,6 +94,12 @@ impl DashboardState {
         }
         if self.confirm_unlock.as_deref().is_some_and(|v| v != vin) {
             self.confirm_unlock = None;
+        }
+        if self.commands_vin.as_deref() != Some(vin) {
+            if self.commands_vin.is_some() {
+                self.commands.reset_for_other_car();
+            }
+            self.commands_vin = Some(vin.to_string());
         }
     }
 }
@@ -94,6 +115,15 @@ pub enum DashboardAction {
     SetTileTemplate(String),
 }
 
+/// What the command bar needs beyond the vehicle data, kept by the app.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CommandInputs<'a> {
+    /// Commands the car lists; `None` when the list is absent or empty.
+    pub supported: Option<&'a HashSet<CommandName>>,
+    /// Epoch ms of the last accepted climatisation start for this car.
+    pub climate_started_ms: Option<i64>,
+}
+
 pub fn show(
     ui: &mut Ui,
     state: &mut DashboardState,
@@ -101,6 +131,7 @@ pub fn show(
     vin: &str,
     label: &str,
     data: Option<&VehicleData>,
+    inputs: CommandInputs<'_>,
 ) -> Vec<DashboardAction> {
     let mut actions = Vec::new();
     state.retain_vin(vin);
@@ -157,6 +188,30 @@ pub fn show(
     if d.statistics.is_some() {
         section_title(ui, "Trip");
         wrapped_row(ui, |ui| health::show_trip(ui, d.statistics.as_ref(), is_ev));
+    }
+    section_title(ui, "Commands");
+    let availability = d
+        .accessibility
+        .as_ref()
+        .and_then(|a| a.availability_status.as_ref());
+    let busy_command = state.busy_command(vin);
+    let sent = card_full_width(ui, |ui| {
+        commands_bar::show(
+            ui,
+            &mut state.commands,
+            availability,
+            inputs.supported,
+            busy_command,
+            is_ev,
+            inputs.climate_started_ms,
+            chrono::Utc::now().timestamp_millis(),
+        )
+    });
+    if let Some((command, minutes)) = sent {
+        if !state.is_busy(vin) {
+            state.begin_command(vin, command);
+            actions.push(DashboardAction::Command(command, minutes));
+        }
     }
     ui.add_space(GAP);
     errors(ui, data);
@@ -275,6 +330,16 @@ fn wrapped_row(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
             add(ui);
         },
     );
+}
+
+/// A card spanning the row, returning what `add` returns.
+fn card_full_width<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let mut out = None;
+    card(ui, |ui| {
+        ui.set_width(ui.available_width());
+        out = Some(add(ui));
+    });
+    out.expect("card runs its contents")
 }
 
 /// "06 Nov 14:05" from the position's RFC 3339 timestamp.
