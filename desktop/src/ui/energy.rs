@@ -46,7 +46,7 @@ pub fn format_current_limit(amps: f64) -> String {
 fn ok_value(f: Option<&EnergyField<Value>>) -> Option<&Value> {
     match f? {
         EnergyField::Ok { value, .. } => Some(value),
-        EnergyField::Error { .. } => None,
+        EnergyField::Error { .. } | EnergyField::Unknown => None,
     }
 }
 

@@ -36,6 +36,11 @@ pub enum AuthError {
     Http(#[from] reqwest::Error),
     #[error("Unexpected response from the token endpoint: {0}")]
     BadResponse(String),
+    /// The token endpoint answered with something other than an OAuth
+    /// rejection (5xx, 429, an unexpected status or an undecodable body).
+    /// Says nothing about the tokens: retry later.
+    #[error("Volvo ID is temporarily unavailable ({0}).")]
+    Unavailable(String),
     #[error("Start sign-in from this window, then return here.")]
     NoPendingSignIn,
 }

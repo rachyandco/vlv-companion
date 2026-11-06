@@ -89,18 +89,21 @@ pub fn is_supported(command: CommandName, supported: Option<&HashSet<CommandName
     supported.is_none_or(|s| s.is_empty() || s.contains(&command))
 }
 
-/// Whether `command`'s button takes clicks: the car is AVAILABLE, privacy
-/// mode was not reported, the car supports it, no command is in flight, and
-/// (for Stop climatisation) a climatisation is running.
+/// Whether `command`'s button takes clicks: the Volvo session has not
+/// expired, the car is AVAILABLE, privacy mode was not reported, the car
+/// supports it, no command is in flight, and (for Stop climatisation) a
+/// climatisation is running.
 pub fn is_enabled(
     command: CommandName,
+    session_expired: bool,
     available: bool,
     privacy_blocked: bool,
     supported: Option<&HashSet<CommandName>>,
     busy: Option<CommandName>,
     climate_active: bool,
 ) -> bool {
-    available
+    !session_expired
+        && available
         && !privacy_blocked
         && is_supported(command, supported)
         && busy.is_none()
@@ -160,11 +163,14 @@ fn tinted(ui: &mut Ui, color: Color32, add: impl FnOnce(&mut Ui)) {
 }
 
 /// Draws the bar; returns a command to send (with its engine runtime) once
-/// clicked, or confirmed for those that ask first.
+/// clicked, or confirmed for those that ask first. `session_expired` holds
+/// the expiry message while the Volvo session is gone: every button is
+/// disabled and the "Commands unavailable" banner reads it.
 #[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut Ui,
     st: &mut State,
+    session_expired: Option<&str>,
     availability: Option<&Availability>,
     supported: Option<&HashSet<CommandName>>,
     busy: Option<CommandName>,
@@ -212,7 +218,10 @@ pub fn show(
             );
         });
     }
-    let block = if st.privacy_blocked {
+    let expired = session_expired.is_some();
+    let block = if let Some(msg) = session_expired {
+        Some(msg.to_string())
+    } else if st.privacy_blocked {
         Some(humanize_reason("PRIVACY_ENABLED"))
     } else {
         availability
@@ -229,6 +238,7 @@ pub fn show(
     let mut button = |ui: &mut Ui, st: &State, command: CommandName| {
         let enabled = is_enabled(
             command,
+            expired,
             available,
             st.privacy_blocked,
             supported,
@@ -304,6 +314,7 @@ pub fn show(
     if let Some(c) = st.confirm {
         let still = is_enabled(
             c,
+            expired,
             available,
             st.privacy_blocked,
             supported,
@@ -373,14 +384,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn enablement_follows_availability_privacy_support_and_busy() {
+    fn enablement_follows_session_availability_privacy_support_and_busy() {
         let lock = CommandName::Lock;
-        assert!(is_enabled(lock, true, false, None, None, false));
-        assert!(!is_enabled(lock, false, false, None, None, false));
-        assert!(!is_enabled(lock, true, true, None, None, false));
+        assert!(is_enabled(lock, false, true, false, None, None, false));
+        assert!(!is_enabled(lock, false, false, false, None, None, false));
+        assert!(!is_enabled(lock, false, true, true, None, None, false));
+        // An expired session disables every button, whatever else holds.
+        assert!(!is_enabled(lock, true, true, false, None, None, false));
+        assert!(!is_enabled(
+            CommandName::ClimatizationStop,
+            true,
+            true,
+            false,
+            None,
+            None,
+            true
+        ));
         // Any command in flight disables every button.
         assert!(!is_enabled(
             lock,
+            false,
             true,
             false,
             None,
@@ -389,10 +412,19 @@ mod tests {
         ));
         // An empty or absent list leaves everything enabled.
         let empty = HashSet::new();
-        assert!(is_enabled(lock, true, false, Some(&empty), None, false));
+        assert!(is_enabled(
+            lock,
+            false,
+            true,
+            false,
+            Some(&empty),
+            None,
+            false
+        ));
         let only_honk = HashSet::from([CommandName::Honk]);
         assert!(!is_enabled(
             lock,
+            false,
             true,
             false,
             Some(&only_honk),
@@ -402,6 +434,7 @@ mod tests {
         assert!(!is_supported(lock, Some(&only_honk)));
         assert!(is_enabled(
             CommandName::Honk,
+            false,
             true,
             false,
             Some(&only_honk),
@@ -410,8 +443,8 @@ mod tests {
         ));
         // Stop climatisation needs a running climatisation.
         let stop = CommandName::ClimatizationStop;
-        assert!(!is_enabled(stop, true, false, None, None, false));
-        assert!(is_enabled(stop, true, false, None, None, true));
+        assert!(!is_enabled(stop, false, true, false, None, None, false));
+        assert!(is_enabled(stop, false, true, false, None, None, true));
     }
 
     #[test]

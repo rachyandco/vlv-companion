@@ -229,6 +229,10 @@ pub enum EnergyField<T> {
         #[serde(default)]
         message: Option<String>,
     },
+    /// Any other status (e.g. `PENDING`): rendered as "—", like an error,
+    /// instead of failing the whole energy state.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -610,6 +614,24 @@ mod tests {
         let ok: EnergyField<serde_json::Value> =
             serde_json::from_str(r#"{"status":"OK","value":44,"unit":"%"}"#).unwrap();
         assert_eq!(render_energy(Some(&ok)), "44 %");
+    }
+
+    #[test]
+    fn unknown_energy_status_parses_to_unknown() {
+        let f: EnergyField<serde_json::Value> = p(r#"{"status":"PENDING"}"#);
+        assert_eq!(f, EnergyField::Unknown);
+        assert_eq!(render_energy(Some(&f)), "—");
+        let s: EnergyState = p(r#"{
+            "batteryChargeLevel":{"status":"OK","value":80,"unit":"percentage"},
+            "chargingStatus":{"status":"PENDING"},
+            "electricRange":{"status":"ERROR","code":"E"}
+        }"#);
+        assert_eq!(s.charging_status, Some(EnergyField::Unknown));
+        assert!(matches!(
+            s.battery_charge_level,
+            Some(EnergyField::Ok { .. })
+        ));
+        assert!(matches!(s.electric_range, Some(EnergyField::Error { .. })));
     }
 
     #[test]

@@ -3,7 +3,7 @@
 
 use std::future::Future;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::api::client::VolvoClient;
 use crate::api::error::ApiError;
@@ -36,7 +36,10 @@ pub struct Session {
     pub http: reqwest::Client,
     pub endpoint: TokenEndpoint,
     pub expired: bool,
-    pub last_token_refresh: Option<Instant>,
+    /// Unix seconds of the last successful token refresh or sign-in. Wall
+    /// clock on purpose: Volvo ID's idle limit keeps running while the
+    /// machine is suspended, and a monotonic clock does not.
+    pub last_token_refresh: Option<i64>,
     api_base: String,
     client: Arc<VolvoClient>,
     /// Set when the session has just expired; the worker turns it into one
@@ -109,13 +112,16 @@ impl Session {
         self.expired_notice.take()
     }
 
-    /// True when the keep-alive refresh is due (signed in and not refreshed
-    /// within `KEEPALIVE_INTERVAL`).
-    pub fn keepalive_due(&self, now: Instant) -> bool {
+    /// True when the keep-alive refresh is due: signed in and not refreshed
+    /// within `KEEPALIVE_INTERVAL` of `now_unix` (wall-clock seconds). A
+    /// clock that went backwards also makes it due, once.
+    pub fn keepalive_due(&self, now_unix: i64) -> bool {
+        let interval = KEEPALIVE_INTERVAL.as_secs() as i64;
         self.signed_in()
-            && self
-                .last_token_refresh
-                .is_none_or(|t| now.saturating_duration_since(t) >= KEEPALIVE_INTERVAL)
+            && self.last_token_refresh.is_none_or(|t| {
+                let elapsed = now_unix - t;
+                !(0..interval).contains(&elapsed)
+            })
     }
 
     /// Drops the tokens (memory and disk), stops polling and records a notice.
@@ -163,8 +169,11 @@ impl Session {
         Ok(t.access_token.clone())
     }
 
-    /// Uses the refresh token now. A rejected refresh expires the session; a
-    /// transport failure is reported as `ApiError::Network` and keeps it.
+    /// Uses the refresh token now. Only a refusal of the grant (400/401 with
+    /// `invalid_grant`, `invalid_client`, `unauthorized_client` or
+    /// `invalid_request`) expires the session. Transport failures, 5xx, 429,
+    /// other statuses and undecodable answers are reported as
+    /// `ApiError::Network` and keep it, so the caller retries later.
     pub async fn refresh_tokens(&mut self) -> Result<String, ApiError> {
         let Some(old) = self.tokens.clone() else {
             return Err(ApiError::SessionExpired(NOT_SIGNED_IN.into()));
@@ -180,14 +189,14 @@ impl Session {
                 }
                 let access = fresh.access_token.clone();
                 self.tokens = Some(fresh);
-                self.last_token_refresh = Some(Instant::now());
+                self.last_token_refresh = Some(chrono::Utc::now().timestamp());
                 self.persist_tokens();
                 Ok(access)
             }
-            Err(AuthError::Http(e)) => Err(ApiError::Network(e.to_string())),
-            Err(e) => Err(self.expire(&format!(
+            Err(e) if e.is_rejection() => Err(self.expire(&format!(
                 "Your Volvo session has expired ({e}). Sign in again."
             ))),
+            Err(e) => Err(ApiError::Network(e.to_string())),
         }
     }
 
@@ -244,7 +253,7 @@ impl Session {
         self.tokens = Some(tokens);
         self.expired = false;
         self.expired_notice = None;
-        self.last_token_refresh = Some(Instant::now());
+        self.last_token_refresh = Some(chrono::Utc::now().timestamp());
         self.persist_tokens();
         Ok(())
     }
@@ -357,6 +366,70 @@ mod tests {
             Err(ApiError::SessionExpired(_))
         ));
         token.assert_hits(1);
+    }
+
+    #[tokio::test]
+    async fn unavailable_token_endpoint_keeps_the_session() {
+        let server = httpmock::MockServer::start();
+        let token = server.mock(|w, t| {
+            w.method("POST").path("/token");
+            t.status(503).body("Service Unavailable");
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::in_dir(dir.path());
+        let old = tokens("OLD", chrono::Utc::now().timestamp() + 3600);
+        crate::config::save_tokens(&paths, &old).unwrap();
+        let mut s = session_with(paths.clone(), Some(old), &server.base_url());
+        let r = s.refresh_tokens().await;
+        assert!(matches!(r, Err(ApiError::Network(_))), "{r:?}");
+        assert!(!s.expired);
+        assert_eq!(s.tokens.as_ref().unwrap().access_token, "OLD");
+        assert!(crate::config::load_tokens(&paths).is_some());
+        assert!(s.take_expired_notice().is_none());
+        assert!(s.last_token_refresh.is_none());
+        token.assert_hits(1);
+    }
+
+    #[tokio::test]
+    async fn invalid_grant_on_refresh_expires_the_session() {
+        let server = httpmock::MockServer::start();
+        server.mock(|w, t| {
+            w.method("POST").path("/token");
+            t.status(400)
+                .json_body(serde_json::json!({"error":"invalid_grant"}));
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let far = chrono::Utc::now().timestamp() + 3600;
+        let mut s = session_with(
+            Paths::in_dir(dir.path()),
+            Some(tokens("OLD", far)),
+            &server.base_url(),
+        );
+        assert!(matches!(
+            s.refresh_tokens().await,
+            Err(ApiError::SessionExpired(_))
+        ));
+        assert!(s.expired);
+        assert!(s.tokens.is_none());
+    }
+
+    #[test]
+    fn keepalive_follows_the_wall_clock() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session_with(
+            Paths::in_dir(dir.path()),
+            Some(tokens("A", 0)),
+            "http://127.0.0.1:9",
+        );
+        let interval = KEEPALIVE_INTERVAL.as_secs() as i64;
+        assert!(s.keepalive_due(1_000_000));
+        s.last_token_refresh = Some(1_000_000);
+        assert!(!s.keepalive_due(1_000_000 + interval - 1));
+        assert!(s.keepalive_due(1_000_000 + interval));
+        // A clock that went backwards makes it due (the refresh resets it).
+        assert!(s.keepalive_due(999_000));
+        s.expired = true;
+        assert!(!s.keepalive_due(1_000_000 + interval));
     }
 
     #[test]

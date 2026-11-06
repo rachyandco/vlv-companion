@@ -183,13 +183,15 @@ impl MapPanel {
         });
     }
 
-    /// Draws the map card contents. `updated` is when the position was taken.
+    /// Draws the map card contents. `updated` is when the position was
+    /// taken; `can_refresh` is false while the session is expired.
     pub fn show(
         &mut self,
         ui: &mut Ui,
         location: Option<&ParsedLocation>,
         stations: &[ChargingStation],
         updated: Option<&str>,
+        can_refresh: bool,
     ) -> Vec<DashboardAction> {
         let mut actions = Vec::new();
         if self.selected_station.is_some_and(|i| i >= stations.len()) || !self.chargers_on {
@@ -211,7 +213,10 @@ impl MapPanel {
                     self.chargers_on = !self.chargers_on;
                     actions.push(DashboardAction::ToggleChargers);
                 }
-                if ui.button("Refresh").clicked() {
+                if ui
+                    .add_enabled(can_refresh, egui::Button::new("Refresh"))
+                    .clicked()
+                {
                     self.memory.follow_my_position();
                     actions.push(DashboardAction::RefreshLocation);
                 }

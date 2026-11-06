@@ -40,7 +40,8 @@ const GARAGE_PATH: &str = "/connected-vehicle/v2/vehicles";
 const MAX_IN_FLIGHT: usize = 4;
 const TICK: Duration = Duration::from_secs(1);
 const POST_COMMAND_REFRESH: Duration = Duration::from_secs(5);
-/// Wait before retrying a keep-alive refresh that failed on the network.
+/// Wait before retrying a keep-alive refresh that failed on the network or
+/// met an unavailable token endpoint.
 const KEEPALIVE_RETRY: Duration = Duration::from_secs(60);
 const CHARGER_RADIUS_M: u32 = 5000;
 
@@ -117,6 +118,12 @@ pub fn spawn(
     (req_tx, ev_rx)
 }
 
+/// Whether a failed keep-alive may be retried at `now_unix`. A wall clock
+/// set back by more than the retry wait does not hold the retry off.
+fn keepalive_retry_passed(retry_at: Option<i64>, now_unix: i64) -> bool {
+    retry_at.is_none_or(|t| now_unix >= t || t - now_unix > KEEPALIVE_RETRY.as_secs() as i64)
+}
+
 fn api_message(e: &ApiError) -> String {
     e.region_hint()
         .map(str::to_owned)
@@ -134,7 +141,8 @@ struct Worker {
     scheduler: Scheduler,
     activity: Activity,
     offline: bool,
-    keepalive_retry_at: Option<Instant>,
+    /// Unix seconds before which a failed keep-alive is not retried.
+    keepalive_retry_at: Option<i64>,
 }
 
 impl Worker {
@@ -186,7 +194,7 @@ impl Worker {
                     None | Some(Msg::Shutdown) => break,
                     Some(Msg::Ui(req)) => self.handle(req).await,
                     Some(Msg::Callback(url)) => self.finish_sign_in(&url).await,
-                    Some(Msg::DelayedRefresh(vin)) => self.refresh(&vin, true).await,
+                    Some(Msg::DelayedRefresh(vin)) => self.refresh(&vin, true, Instant::now()).await,
                 },
                 _ = timer.tick() => self.on_tick().await,
             }
@@ -236,9 +244,9 @@ impl Worker {
             }
             UiRequest::SelectVehicle(vin) => {
                 self.selected = Some(vin.clone());
-                self.refresh(&vin, false).await;
+                self.refresh(&vin, false, Instant::now()).await;
             }
-            UiRequest::Refresh { vin, force } => self.refresh(&vin, force).await,
+            UiRequest::Refresh { vin, force } => self.refresh(&vin, force, Instant::now()).await,
             UiRequest::LoadGarage => self.load_garage().await,
             UiRequest::Command {
                 vin,
@@ -287,7 +295,10 @@ impl Worker {
 
     async fn on_tick(&mut self) {
         let now = Instant::now();
-        if self.keepalive_retry_at.is_none_or(|t| now >= t) && self.session.keepalive_due(now) {
+        let now_unix = chrono::Utc::now().timestamp();
+        if keepalive_retry_passed(self.keepalive_retry_at, now_unix)
+            && self.session.keepalive_due(now_unix)
+        {
             self.keepalive().await;
         }
         if !self.session.signed_in() {
@@ -295,7 +306,7 @@ impl Worker {
         }
         if self.scheduler.should_tick(&self.activity, now) {
             if let Some(vin) = self.selected_vin() {
-                self.refresh(&vin, false).await;
+                self.refresh(&vin, false, now).await;
             }
         }
     }
@@ -303,7 +314,9 @@ impl Worker {
     async fn keepalive(&mut self) {
         let r = self.session.refresh_tokens().await;
         self.keepalive_retry_at = match &r {
-            Err(ApiError::Network(_)) => Some(Instant::now() + KEEPALIVE_RETRY),
+            Err(ApiError::Network(_)) => {
+                Some(chrono::Utc::now().timestamp() + KEEPALIVE_RETRY.as_secs() as i64)
+            }
             _ => None,
         };
         self.note(&r);
@@ -333,7 +346,7 @@ impl Worker {
                 }
                 self.emit(WorkerEvent::Garage(self.garage.clone()));
                 if let Some(vin) = self.selected_vin() {
-                    self.refresh(&vin, false).await;
+                    self.refresh(&vin, false, Instant::now()).await;
                 }
             }
             Err(ApiError::SessionExpired(_)) => {}
@@ -343,8 +356,10 @@ impl Worker {
 
     /// Fetches the due (or, with `force`, all) resources of `vin`, at most
     /// `MAX_IN_FLIGHT` at a time. Resources answered with 401 are retried
-    /// once after a token refresh.
-    async fn refresh(&mut self, vin: &str, force: bool) {
+    /// once after a token refresh. Entries are stamped with `now` (the
+    /// tick that asked), not the answer's arrival, so a resource whose
+    /// lifetime equals the polling interval is due again at the next tick.
+    async fn refresh(&mut self, vin: &str, force: bool, now: Instant) {
         if !self.session.signed_in() {
             return;
         }
@@ -352,26 +367,30 @@ impl Worker {
             .caches
             .entry(vin.to_string())
             .or_default()
-            .due(Instant::now(), force);
+            .due(now, force);
         if due.is_empty() {
             return;
         }
         let token = match self.session.access_token().await {
             Ok(t) => t,
-            Err(e) => return self.fail_resources(vin, due, e),
+            Err(e) => return self.fail_resources(vin, due, e, now),
         };
-        let unauthorised = self.fetch_batch(vin, due, token).await;
+        let unauthorised = self.fetch_batch(vin, due, token, now).await;
         if unauthorised.is_empty() {
             return;
         }
         match self.session.refresh_tokens().await {
             Ok(token) => {
-                if !self.fetch_batch(vin, unauthorised, token).await.is_empty() {
+                if !self
+                    .fetch_batch(vin, unauthorised, token, now)
+                    .await
+                    .is_empty()
+                {
                     self.session
                         .expire("Your Volvo session was rejected by the API. Sign in again.");
                 }
             }
-            Err(e) => self.fail_resources(vin, unauthorised, e),
+            Err(e) => self.fail_resources(vin, unauthorised, e, now),
         }
     }
 
@@ -379,7 +398,7 @@ impl Worker {
     /// resource ends with a `Resource` event, and caches the error so the
     /// next tick retries them. Skipped on `SessionExpired`, which already
     /// produces its own event.
-    fn fail_resources(&mut self, vin: &str, list: Vec<Resource>, e: ApiError) {
+    fn fail_resources(&mut self, vin: &str, list: Vec<Resource>, e: ApiError, now: Instant) {
         if let ApiError::Network(_) = e {
             self.set_offline(true);
         }
@@ -387,7 +406,6 @@ impl Worker {
             return;
         }
         let message = api_message(&e);
-        let now = Instant::now();
         for resource in list {
             self.caches.entry(vin.to_string()).or_default().put(
                 resource,
@@ -409,6 +427,7 @@ impl Worker {
         vin: &str,
         list: Vec<Resource>,
         token: String,
+        now: Instant,
     ) -> Vec<Resource> {
         let client = self.session.client();
         let gate = Arc::new(Semaphore::new(MAX_IN_FLIGHT));
@@ -431,11 +450,10 @@ impl Worker {
             }
             self.note(&r);
             let value = r.map_err(|e| api_message(&e));
-            self.caches.entry(vin.to_string()).or_default().put(
-                resource,
-                value.clone(),
-                Instant::now(),
-            );
+            self.caches
+                .entry(vin.to_string())
+                .or_default()
+                .put(resource, value.clone(), now);
             self.emit(WorkerEvent::Resource {
                 vin: vin.to_string(),
                 resource,
@@ -475,6 +493,7 @@ impl Worker {
             },
             Err(e) => {
                 return self.emit(WorkerEvent::CommandError {
+                    vin,
                     command,
                     message: api_message(&e),
                 })
@@ -549,6 +568,16 @@ impl Worker {
 mod tests {
     use super::*;
 
+    #[test]
+    fn keepalive_retry_waits_on_the_wall_clock() {
+        let retry = KEEPALIVE_RETRY.as_secs() as i64;
+        assert!(keepalive_retry_passed(None, 0));
+        assert!(!keepalive_retry_passed(Some(1_000), 1_000 - 1));
+        assert!(keepalive_retry_passed(Some(1_000), 1_000));
+        // The clock jumped back further than the wait: retry anyway.
+        assert!(keepalive_retry_passed(Some(1_000), 1_000 - retry - 1));
+    }
+
     #[tokio::test]
     async fn forced_refresh_with_unreachable_token_endpoint_fails_every_resource() {
         // A closed port: connecting to it is refused.
@@ -579,7 +608,7 @@ mod tests {
         let (msg_tx, _msg_rx) = mpsc::unbounded_channel();
         let mut w = Worker::new(session, ev_tx, Box::new(|| {}), msg_tx);
 
-        w.refresh("V", true).await;
+        w.refresh("V", true, Instant::now()).await;
 
         let resources: Vec<_> = ev_rx
             .try_iter()

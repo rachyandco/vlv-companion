@@ -95,8 +95,9 @@ pub fn battery_card(ui: &mut Ui, percent: Option<f64>, caption: &str) {
 
 /// The central-lock toggle. Returns true when clicked; the caller asks for
 /// confirmation before unlocking. While `busy` (a command is in flight) it
-/// shows "Sending…" and ignores clicks.
-pub fn lock_card(ui: &mut Ui, lock: Option<&str>, busy: bool) -> bool {
+/// shows "Sending…" and ignores clicks; while `session_expired` it says so
+/// and ignores clicks too.
+pub fn lock_card(ui: &mut Ui, lock: Option<&str>, busy: bool, session_expired: bool) -> bool {
     let locked = lock == Some("LOCKED");
     let known = locked || lock == Some("UNLOCKED");
     let (state, hint) = match (known, locked) {
@@ -104,7 +105,13 @@ pub fn lock_card(ui: &mut Ui, lock: Option<&str>, busy: bool) -> bool {
         (true, true) => ("Locked", "Tap to unlock"),
         (true, false) => ("Unlocked", "Tap to lock"),
     };
-    let hint = if busy { "Sending…" } else { hint };
+    let hint = if busy {
+        "Sending…"
+    } else if session_expired {
+        "Session expired — sign in again"
+    } else {
+        hint
+    };
     let blue = Color32::from_rgb(64, 128, 255);
     // Shrinks to the row on narrow windows.
     let width = LOCK_WIDTH.min(ui.max_rect().width()).max(CARD_MIN_WIDTH);
@@ -125,7 +132,7 @@ pub fn lock_card(ui: &mut Ui, lock: Option<&str>, busy: bool) -> bool {
             });
         })
     });
-    if busy {
+    if busy || session_expired {
         return false;
     }
     let resp = resp.response.interact(Sense::click());

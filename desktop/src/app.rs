@@ -115,6 +115,48 @@ pub fn command_outcome(status: &str, message: Option<&str>, bucket: Bucket) -> C
     }
 }
 
+/// A command's answer, as the worker reported it.
+#[derive(Debug, Clone, Copy)]
+pub enum CommandAnswer<'a> {
+    /// The API answered with an invoke status.
+    Result {
+        status: &'a str,
+        message: Option<&'a str>,
+        bucket: Bucket,
+    },
+    /// The request failed (network, HTTP error, …).
+    Error(&'a str),
+}
+
+/// The banner for an answer about a car that is no longer on screen: only
+/// failures (user-actionable, failed or errored) are shown, as Danger and
+/// prefixed with that car's `label`; accepted, pending and outcome-unknown
+/// answers stay silent. Flashes, privacy and the unlock window are not
+/// touched for such a car.
+pub fn other_car_banner(
+    label: &str,
+    command: CommandName,
+    answer: CommandAnswer<'_>,
+) -> Option<(Level, String)> {
+    let text = match answer {
+        CommandAnswer::Error(message) => message.to_string(),
+        CommandAnswer::Result {
+            status: "UNKNOWN", ..
+        } => return None,
+        CommandAnswer::Result {
+            bucket: Bucket::Success | Bucket::Pending,
+            ..
+        } => return None,
+        CommandAnswer::Result {
+            status, message, ..
+        } => friendly_message(status, message),
+    };
+    Some((
+        Level::Danger,
+        format!("{label} — {}: {text}", command.label()),
+    ))
+}
+
 /// The car's command list as a set; `None` when absent or with no known name.
 pub fn supported_commands(list: Option<&[CommandListItem]>) -> Option<HashSet<CommandName>> {
     let set: HashSet<CommandName> = list?
@@ -237,10 +279,16 @@ impl App {
                 bucket,
                 ready_to_unlock_until,
             } => {
-                self.dashboard.finish_command(Some(&vin), command);
-                // Flashes, the unlock window and privacy belong to the car on screen.
+                self.dashboard.finish_command(&vin, command);
+                // Flashes, the unlock window and privacy belong to the car
+                // on screen; another car only reports its failures.
                 if self.state.selected_vin.as_deref() != Some(vin.as_str()) {
-                    return;
+                    let answer = CommandAnswer::Result {
+                        status: &status,
+                        message: message.as_deref(),
+                        bucket,
+                    };
+                    return self.other_car_answer(&vin, command, answer);
                 }
                 let out = command_outcome(&status, message.as_deref(), bucket);
                 let bar = &mut self.dashboard.commands;
@@ -259,8 +307,15 @@ impl App {
                     self.set_banner(level, text);
                 }
             }
-            WorkerEvent::CommandError { command, message } => {
-                self.dashboard.finish_command(None, command);
+            WorkerEvent::CommandError {
+                vin,
+                command,
+                message,
+            } => {
+                self.dashboard.finish_command(&vin, command);
+                if self.state.selected_vin.as_deref() != Some(vin.as_str()) {
+                    return self.other_car_answer(&vin, command, CommandAnswer::Error(&message));
+                }
                 self.dashboard
                     .commands
                     .set_flash(command, false, Instant::now());
@@ -282,6 +337,15 @@ impl App {
             WorkerEvent::ClimateStopped { vin } => {
                 self.climate_started.remove(&vin);
             }
+        }
+    }
+
+    /// Shows the failure banner, if any, for a command answer about `vin`
+    /// while another car is selected.
+    fn other_car_answer(&mut self, vin: &str, command: CommandName, answer: CommandAnswer<'_>) {
+        let label = vehicle_label(&self.state.config, &self.state.vehicles, vin);
+        if let Some((level, text)) = other_car_banner(&label, command, answer) {
+            self.set_banner(level, text);
         }
     }
 
@@ -481,6 +545,7 @@ impl App {
         let inputs = CommandInputs {
             supported: supported.as_ref(),
             climate_started_ms: self.climate_started.get(&vin).copied(),
+            session_expired: self.state.session_expired.as_deref(),
         };
         let actions = dashboard::show(
             ui,
@@ -523,6 +588,7 @@ impl App {
 
     fn on_dashboard(&mut self, vin: &str, action: DashboardAction) {
         match action {
+            DashboardAction::Command(..) if self.state.session_expired.is_some() => {}
             DashboardAction::Command(command, _) if self.demo => self.demo_command(vin, command),
             DashboardAction::Command(command, runtime_minutes) => {
                 self.send(UiRequest::Command {
@@ -533,6 +599,8 @@ impl App {
             }
             // The worker has no per-resource refresh; like the phone's
             // pull-to-refresh, this forces every resource.
+            // Disabled while the session is expired (spec §6.2).
+            DashboardAction::RefreshLocation if self.state.session_expired.is_some() => {}
             DashboardAction::RefreshLocation => self.send(UiRequest::Refresh {
                 vin: vin.to_string(),
                 force: true,
@@ -656,6 +724,60 @@ mod tests {
         assert_eq!(
             unknown.banner,
             Some((Level::Info, "Sent — outcome unknown.".into()))
+        );
+    }
+
+    #[test]
+    fn other_car_answers_only_report_failures() {
+        let result = |status, message, bucket| CommandAnswer::Result {
+            status,
+            message,
+            bucket,
+        };
+        let lock = CommandName::Lock;
+        for quiet in [
+            result("COMPLETED", None, Bucket::Success),
+            result("WAITING", None, Bucket::Pending),
+            result("UNKNOWN", None, Bucket::Failure),
+        ] {
+            assert_eq!(other_car_banner("XC40", lock, quiet), None);
+        }
+        assert_eq!(
+            other_car_banner(
+                "XC40",
+                lock,
+                result("UNABLE_TO_LOCK_DOOR_OPEN", None, Bucket::UserActionable)
+            ),
+            Some((
+                Level::Danger,
+                "XC40 — Lock: A door is open — close it and try again.".into()
+            ))
+        );
+        // Privacy mode on another car is a plain failure, not the sticky banner.
+        let privacy = other_car_banner(
+            "XC40",
+            lock,
+            result("NOT_ALLOWED_PRIVACY_ENABLED", None, Bucket::UserActionable),
+        );
+        assert_eq!(privacy.map(|(l, _)| l), Some(Level::Danger));
+        assert_eq!(
+            other_car_banner(
+                "YV1X",
+                CommandName::Honk,
+                result("WEIRD", Some("from api"), Bucket::Failure)
+            ),
+            Some((
+                Level::Danger,
+                format!("YV1X — {}: from api", CommandName::Honk.label())
+            ))
+        );
+        assert_eq!(
+            other_car_banner(
+                "2024 EX30",
+                lock,
+                CommandAnswer::Error("network error: dns")
+            ),
+            Some((Level::Danger, "2024 EX30 — Lock: network error: dns".into()))
         );
     }
 

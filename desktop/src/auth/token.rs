@@ -25,6 +25,42 @@ struct ErrorBody {
     error_description: Option<String>,
 }
 
+/// OAuth error codes that mean the grant itself was refused: the refresh
+/// token (or the client) is no longer accepted and only a new sign-in helps.
+pub const REJECTION_CODES: [&str; 4] = [
+    "invalid_grant",
+    "invalid_client",
+    "unauthorized_client",
+    "invalid_request",
+];
+
+/// Maps a non-2xx token-endpoint answer. A 400 or 401 with an OAuth error
+/// body is `AuthError::OAuth`; everything else (5xx, 429, other statuses,
+/// bodies that are not an OAuth error) is `AuthError::Unavailable`.
+fn classify_error(status: u16, body: &str) -> AuthError {
+    if matches!(status, 400 | 401) {
+        if let Ok(ErrorBody {
+            error: Some(error),
+            error_description,
+        }) = serde_json::from_str::<ErrorBody>(body)
+        {
+            return AuthError::OAuth {
+                error,
+                description: error_description,
+            };
+        }
+    }
+    AuthError::Unavailable(format!("HTTP {status}"))
+}
+
+impl AuthError {
+    /// True when the token endpoint refused the grant (400/401 with one of
+    /// `REJECTION_CODES`): the session cannot be kept.
+    pub fn is_rejection(&self) -> bool {
+        matches!(self, AuthError::OAuth { error, .. } if REJECTION_CODES.contains(&error.as_str()))
+    }
+}
+
 pub fn needs_refresh(expires_at_unix: i64, now_unix: i64) -> bool {
     expires_at_unix - 60 <= now_unix
 }
@@ -66,19 +102,7 @@ impl TokenEndpoint {
         let status = resp.status();
         let body = resp.text().await?;
         if !status.is_success() {
-            return Err(match serde_json::from_str::<ErrorBody>(&body) {
-                Ok(ErrorBody {
-                    error: Some(error),
-                    error_description,
-                }) => AuthError::OAuth {
-                    error,
-                    description: error_description,
-                },
-                _ => AuthError::OAuth {
-                    error: format!("HTTP {}", status.as_u16()),
-                    description: None,
-                },
-            });
+            return Err(classify_error(status.as_u16(), &body));
         }
         serde_json::from_str(&body).map_err(|e| AuthError::BadResponse(e.to_string()))
     }
@@ -204,6 +228,30 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(e.to_string(), "invalid_grant: Code not valid");
+    }
+
+    #[test]
+    fn only_400_or_401_oauth_bodies_are_rejections() {
+        let grant = r#"{"error":"invalid_grant","error_description":"Token is not active"}"#;
+        assert!(classify_error(400, grant).is_rejection());
+        assert!(classify_error(401, r#"{"error":"invalid_client"}"#).is_rejection());
+        assert!(classify_error(400, r#"{"error":"unauthorized_client"}"#).is_rejection());
+        assert!(classify_error(400, r#"{"error":"invalid_request"}"#).is_rejection());
+        // Other OAuth codes are surfaced but do not end the session.
+        let scope = classify_error(400, r#"{"error":"invalid_scope"}"#);
+        assert!(matches!(scope, AuthError::OAuth { .. }));
+        assert!(!scope.is_rejection());
+        for e in [
+            classify_error(503, grant),
+            classify_error(429, ""),
+            classify_error(500, "<html>"),
+            classify_error(400, "<html>"),
+            classify_error(403, r#"{"error":"invalid_grant"}"#),
+        ] {
+            assert!(matches!(e, AuthError::Unavailable(_)), "{e:?}");
+            assert!(!e.is_rejection());
+        }
+        assert!(!AuthError::BadResponse("x".into()).is_rejection());
     }
 
     fn fake_jwt(payload: &str) -> String {

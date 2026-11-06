@@ -99,17 +99,24 @@ pub struct Entry {
     pub fetched_at: Instant,
 }
 
+/// Slack on staleness so a resource whose lifetime equals the polling
+/// interval is due at the next tick even when that tick comes a moment early.
+pub const STALE_LEEWAY: Duration = Duration::from_secs(2);
+
 #[derive(Default, Debug)]
 pub struct VehicleCache {
     pub entries: HashMap<Resource, Entry>,
 }
 
 impl VehicleCache {
-    /// A missing entry counts as stale.
+    /// A missing entry counts as stale; so does one within `STALE_LEEWAY`
+    /// of its lifetime.
     pub fn is_stale(&self, r: Resource, now: Instant) -> bool {
         match self.entries.get(&r) {
             None => true,
-            Some(e) => now.saturating_duration_since(e.fetched_at) >= r.stale_after(),
+            Some(e) => {
+                now.saturating_duration_since(e.fetched_at) + STALE_LEEWAY >= r.stale_after()
+            }
         }
     }
 
@@ -169,5 +176,17 @@ mod tests {
             .due(t0 + Duration::from_secs(31), false)
             .contains(&Resource::Doors));
         assert_eq!(c.due(t0, true).len(), Resource::ALL.len());
+    }
+
+    #[test]
+    fn a_60s_resource_is_due_at_the_next_60s_tick() {
+        // Entries are stamped with the tick that requested them; the next
+        // tick may come a little under 60 s later.
+        let tick = Instant::now();
+        let mut c = VehicleCache::default();
+        c.put(Resource::Location, Ok(serde_json::json!({})), tick);
+        assert!(!c.is_stale(Resource::Location, tick + Duration::from_secs(57)));
+        assert!(c.is_stale(Resource::Location, tick + Duration::from_millis(59_500)));
+        assert!(c.is_stale(Resource::Location, tick + Duration::from_secs(60)));
     }
 }

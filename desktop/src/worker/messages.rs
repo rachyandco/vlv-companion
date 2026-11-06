@@ -59,6 +59,7 @@ pub enum WorkerEvent {
         ready_to_unlock_until: Option<i64>,
     },
     CommandError {
+        vin: String,
         command: CommandName,
         message: String,
     },

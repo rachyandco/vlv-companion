@@ -55,13 +55,13 @@ impl DashboardState {
         self.pending = Some((vin.to_string(), command));
     }
 
-    /// Clears the marker on the answer to `command`. `vin` is `None` for
-    /// worker errors, which do not carry one.
-    pub fn finish_command(&mut self, vin: Option<&str>, command: CommandName) {
+    /// Clears the marker on the answer to `command` for `vin`, if that is
+    /// the command in flight.
+    pub fn finish_command(&mut self, vin: &str, command: CommandName) {
         if self
             .pending
             .as_ref()
-            .is_some_and(|(v, c)| *c == command && vin.is_none_or(|x| x == v))
+            .is_some_and(|(v, c)| *c == command && v == vin)
         {
             self.pending = None;
         }
@@ -122,6 +122,9 @@ pub struct CommandInputs<'a> {
     pub supported: Option<&'a HashSet<CommandName>>,
     /// Epoch ms of the last accepted climatisation start for this car.
     pub climate_started_ms: Option<i64>,
+    /// The expiry message while the Volvo session is gone (spec §6.2): the
+    /// lock card, every command and the map's Refresh are disabled.
+    pub session_expired: Option<&'a str>,
 }
 
 pub fn show(
@@ -155,8 +158,9 @@ pub fn show(
         .and_then(|x| x.central_lock.as_ref())
         .map(|r| r.value.as_str());
     let busy = state.is_busy(vin);
+    let expired = inputs.session_expired.is_some();
     wrapped_row(ui, |ui| {
-        if lock_card(ui, lock, busy) && !busy {
+        if lock_card(ui, lock, busy, expired) && !busy && !expired {
             if lock == Some("LOCKED") {
                 state.confirm_unlock = Some(vin.to_string());
             } else {
@@ -168,7 +172,7 @@ pub fn show(
     });
     ui.add_space(GAP);
 
-    middle_row(ui, state, d, is_ev, &mut actions);
+    middle_row(ui, state, d, is_ev, !expired, &mut actions);
 
     if d.energy_state.is_some() || d.energy_caps.is_some() {
         section_title(ui, "Energy");
@@ -199,6 +203,7 @@ pub fn show(
         commands_bar::show(
             ui,
             &mut state.commands,
+            inputs.session_expired,
             availability,
             inputs.supported,
             busy_command,
@@ -208,7 +213,7 @@ pub fn show(
         )
     });
     if let Some((command, minutes)) = sent {
-        if !state.is_busy(vin) {
+        if !state.is_busy(vin) && !expired {
             state.begin_command(vin, command);
             actions.push(DashboardAction::Command(command, minutes));
         }
@@ -216,8 +221,9 @@ pub fn show(
     ui.add_space(GAP);
     errors(ui, data);
 
-    // A refresh showed the car is no longer locked: nothing to unlock.
-    if lock != Some("LOCKED") {
+    // A refresh showed the car is no longer locked (nothing to unlock), or
+    // the session expired.
+    if lock != Some("LOCKED") || expired {
         state.confirm_unlock = None;
     }
     if state.confirm_unlock.is_some() {
@@ -277,7 +283,7 @@ fn energy_number(f: Option<&EnergyField<serde_json::Value>>) -> Option<f64> {
             serde_json::Value::String(s) => s.trim().parse().ok(),
             _ => None,
         },
-        EnergyField::Error { .. } => None,
+        EnergyField::Error { .. } | EnergyField::Unknown => None,
     }
 }
 
@@ -361,6 +367,7 @@ fn middle_row(
     state: &mut DashboardState,
     d: &VehicleData,
     is_ev: bool,
+    can_refresh: bool,
     actions: &mut Vec<DashboardAction>,
 ) {
     const PAD: f32 = 28.0; // card inner margin, both sides
@@ -412,6 +419,7 @@ fn middle_row(
                         location,
                         &state.stations,
                         updated.as_deref(),
+                        can_refresh,
                     ));
                 });
             })
@@ -576,15 +584,10 @@ mod tests {
         assert!(s.is_busy("A"));
         assert!(!s.is_busy("B"));
         // Answers for another car or command leave it set.
-        s.finish_command(Some("B"), CommandName::Lock);
-        s.finish_command(Some("A"), CommandName::Unlock);
-        s.finish_command(None, CommandName::Honk);
+        s.finish_command("B", CommandName::Lock);
+        s.finish_command("A", CommandName::Unlock);
         assert!(s.is_busy("A"));
-        s.finish_command(Some("A"), CommandName::Lock);
-        assert!(!s.is_busy("A"));
-        // Errors carry no VIN and match on the command.
-        s.begin_command("A", CommandName::Unlock);
-        s.finish_command(None, CommandName::Unlock);
+        s.finish_command("A", CommandName::Lock);
         assert!(!s.is_busy("A"));
     }
 
