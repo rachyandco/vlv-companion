@@ -13,6 +13,7 @@ A degoogled-friendly **React Native Android** client for the [Volvo Cars public 
   - **Energy** — battery gauge, charging status, target SoC, charging power, time-to-target, current limit.
   - **Location** — MapLibre + OpenFreeMap tiles, "Open in maps" handoff to OsmAnd / Organic Maps / Magic Earth via `geo:lat,lng`. Optional EV-charger overlay (OpenStreetMap Overpass).
   - **Commands** — lock, lock with reduced guard, unlock (with the `readyToUnlock` countdown banner), honk, flash, honk-and-flash, climatisation start/stop, engine start (1–15 min) / stop.
+- Linux desktop client (Rust, egui) with the same sign-in and the same dashboard data, shipped as a .deb.
 
 ## Stack
 
@@ -112,6 +113,33 @@ Tap **Connect Volvo account** — this opens your system browser for Volvo's log
 You can edit any of these later under the **Settings** tab. Changing the OAuth client/secret/VCC-API-Key automatically signs you out so the next sign-in uses the new credentials cleanly.
 
 Volvo ID does not grant third-party apps the `offline_access` scope, so the refresh token's lifetime follows Volvo's session policy rather than being unlimited. When it lapses the app signs you out and the Garage shows a session-expired message; tap **Reconnect** to sign in again. In practice the session lasts about 30 minutes without use (observed November 2026), so expect to reconnect after leaving the app idle for longer.
+
+## Linux desktop
+
+A native desktop client lives in `desktop/` (Rust, egui). It is released as a `.deb` alongside the APK.
+
+**Install**
+
+```bash
+sudo apt install ./vlv-companion_<ver>_amd64.deb
+```
+
+**Sign in.** The first launch shows the sign-in screen with the same five fields as the phone. Signing in opens your system browser; the bridge page hands the result back through the `volvo-companion://` scheme that the .deb registers (`/usr/share/applications/vlv-companion.desktop`). If your browser refuses custom schemes, paste the callback URL into the fallback field on the sign-in screen. Starting the app a second time prints "Vlv Companion is already running." and exits.
+
+**Files.** Config is stored at `~/.config/vlv-companion/config.json` and tokens at `~/.local/state/vlv-companion/tokens.json`, both with mode 0600.
+
+**Map tiles.** The map needs a raster tile server and none is configured by default. Click **Use OpenStreetMap tiles** to opt in to the OSM tile servers, and read the [OSM tile usage policy](https://operations.osmfoundation.org/policies/tiles/) first.
+
+**Refresh.** Data auto-refreshes every 60 s while the window is focused and every 5 min when idle or unfocused, and never while minimised. While the app runs, the session is kept alive with a token refresh every 20 min. Launching after more than about 30 min away needs **Reconnect**.
+
+**Build locally**
+
+```bash
+cd desktop && cargo run
+cargo install cargo-deb && cargo deb   # run inside desktop/
+```
+
+The APK and the .deb are released together from one `v*` tag, and a release only exists when both built. The desktop Cargo version must equal the tag; the CI check fails otherwise.
 
 ## Continuous Integration
 
