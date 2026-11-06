@@ -21,6 +21,10 @@ fn main() -> eframe::Result {
     }
     let callbacks = match ipc::Listener::bind(&sock) {
         Ok(l) => Some(l.into_receiver()),
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && initial_callback.is_none() => {
+            eprintln!("Vlv Companion is already running.");
+            return Ok(());
+        }
         Err(e) => {
             eprintln!("cannot listen on {}: {e}", sock.display());
             None

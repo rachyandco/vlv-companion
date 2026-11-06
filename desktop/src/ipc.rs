@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -38,6 +38,12 @@ pub struct Listener {
 
 impl Listener {
     pub fn bind(path: &Path) -> io::Result<Listener> {
+        if UnixStream::connect(path).is_ok() {
+            return Err(io::Error::new(
+                io::ErrorKind::AddrInUse,
+                "another instance is listening",
+            ));
+        }
         let _ = std::fs::remove_file(path);
         let inner = UnixListener::bind(path)?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
@@ -53,7 +59,7 @@ impl Listener {
                     let Ok(conn) = conn else { break };
                     let _ = conn.set_read_timeout(Some(Duration::from_secs(5)));
                     let mut line = String::new();
-                    if BufReader::new(conn).read_line(&mut line).is_ok() {
+                    if BufReader::new(conn.take(8192)).read_line(&mut line).is_ok() {
                         let line = line.trim_end_matches(['\r', '\n']).to_string();
                         if !line.is_empty() && tx.send(line).is_err() {
                             break;
@@ -96,6 +102,20 @@ mod tests {
         assert_eq!(
             rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap(),
             "volvo-companion://oauth/callback?code=1&state=2"
+        );
+    }
+
+    #[test]
+    fn bind_refuses_when_listener_alive() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("s.sock");
+        let rx = Listener::bind(&p).unwrap().into_receiver();
+        let err = Listener::bind(&p).err().expect("second bind must fail");
+        assert_eq!(err.kind(), io::ErrorKind::AddrInUse);
+        assert!(try_forward(&p, "volvo-companion://x"));
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            "volvo-companion://x"
         );
     }
 
