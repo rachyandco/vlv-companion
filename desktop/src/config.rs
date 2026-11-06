@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::paths::Paths;
 
 pub const DEFAULT_REDIRECT: &str = "https://volvo.roussel-zeter.eu/redirect/";
-pub const DEFAULT_SCOPES: [&str; 24] = [
+pub const DEFAULT_SCOPES: [&str; 25] = [
     "openid",
     "conve:vehicle_relation",
     "conve:fuel_status",
@@ -27,6 +27,7 @@ pub const DEFAULT_SCOPES: [&str; 24] = [
     "conve:honk_flash",
     "conve:warnings",
     "conve:diagnostics_engine_status",
+    "conve:diagnostics_workshop",
     "conve:brake_status",
     "conve:command_accessibility",
     "conve:commands",
@@ -109,10 +110,34 @@ fn write_atomic(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
 }
 
 pub fn load_config(p: &Paths) -> Config {
-    fs::read(p.config_dir.join("config.json"))
+    let mut cfg: Config = fs::read(p.config_dir.join("config.json"))
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    upgrade_default_scopes(&mut cfg.scopes);
+    cfg
+}
+
+/// Scopes that older builds' default list lacked.
+const SCOPES_ADDED_LATER: [&str; 1] = ["conve:diagnostics_workshop"];
+
+/// A stored scope list that is exactly an older default set (ignoring order)
+/// is replaced by the current default; a customised list is left alone.
+/// Returns true when the list changed.
+pub fn upgrade_default_scopes(scopes: &mut Vec<String>) -> bool {
+    use std::collections::BTreeSet;
+    let have: BTreeSet<&str> = scopes.iter().map(String::as_str).collect();
+    let current: BTreeSet<&str> = DEFAULT_SCOPES.iter().copied().collect();
+    let older: BTreeSet<&str> = DEFAULT_SCOPES
+        .iter()
+        .copied()
+        .filter(|s| !SCOPES_ADDED_LATER.contains(s))
+        .collect();
+    if have.is_empty() || have == current || have != older {
+        return false;
+    }
+    *scopes = DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect();
+    true
 }
 
 pub fn save_config(p: &Paths, c: &Config) -> io::Result<()> {
@@ -142,9 +167,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_config_has_24_scopes_and_no_offline_access() {
+    fn default_config_has_25_scopes_and_no_offline_access() {
         let c = Config::default();
-        assert_eq!(c.scopes.len(), 24);
+        assert_eq!(c.scopes.len(), 25);
         assert!(!c.scopes.iter().any(|s| s == "offline_access"));
         assert_eq!(c.redirect_uri, "https://volvo.roussel-zeter.eu/redirect/");
     }
@@ -197,5 +222,24 @@ mod tests {
     fn legacy_client_ids() {
         assert!(is_legacy_client_id(" DC-abc "));
         assert!(!is_legacy_client_id("vid-dcr-abc"));
+    }
+
+    #[test]
+    fn old_default_scope_list_is_upgraded_but_custom_lists_are_kept() {
+        let older: Vec<String> = DEFAULT_SCOPES
+            .iter()
+            .filter(|s| **s != "conve:diagnostics_workshop")
+            .map(|s| s.to_string())
+            .collect();
+        let mut v = older.clone();
+        assert!(upgrade_default_scopes(&mut v));
+        assert_eq!(v.len(), 25);
+        let mut rev: Vec<String> = older.iter().rev().cloned().collect();
+        assert!(upgrade_default_scopes(&mut rev));
+        let mut current: Vec<String> = DEFAULT_SCOPES.iter().map(|s| s.to_string()).collect();
+        assert!(!upgrade_default_scopes(&mut current));
+        let mut custom = vec!["openid".to_string(), "conve:lock".to_string()];
+        assert!(!upgrade_default_scopes(&mut custom));
+        assert_eq!(custom.len(), 2);
     }
 }

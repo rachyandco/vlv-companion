@@ -64,9 +64,24 @@ pub fn show_health(
 /// to empty. Draws nothing without statistics. Call inside a wrapping row.
 pub fn show_trip(ui: &mut Ui, stats: Option<&Statistics>, is_ev: bool) {
     let Some(s) = stats else { return };
-    status_card(ui, "Trip meter 1", &render(s.trip_meter_1.as_ref()), None);
-    status_card(ui, "Trip meter 2", &render(s.trip_meter_2.as_ref()), None);
+    // Volvo's live payload uses tripMeterManual/Automatic, averageSpeedAutomatic,
+    // averageEnergyConsumption and distanceToEmptyBattery; the spec's older
+    // names are kept as fallbacks for cars that still send them.
+    let trip = s.trip_meter_manual.as_ref().or(s.trip_meter_1.as_ref());
+    let trip_auto = s.trip_meter_automatic.as_ref().or(s.trip_meter_2.as_ref());
+    let to_empty = s
+        .distance_to_empty_battery
+        .as_ref()
+        .or(s.distance_to_empty.as_ref());
+    status_card(ui, "Trip meter", &render(trip), None);
+    status_card(ui, "Trip meter (auto)", &render(trip_auto), None);
     status_card(ui, "Average speed", &render(s.average_speed.as_ref()), None);
+    if let Some(v) = s.average_speed_automatic.as_ref() {
+        status_card(ui, "Average speed (auto)", &render(Some(v)), None);
+    }
+    if let Some(v) = s.average_energy_consumption.as_ref() {
+        status_card(ui, "Energy consumption", &render(Some(v)), None);
+    }
     if !is_ev {
         status_card(
             ui,
@@ -75,10 +90,5 @@ pub fn show_trip(ui: &mut Ui, stats: Option<&Statistics>, is_ev: bool) {
             None,
         );
     }
-    status_card(
-        ui,
-        "Distance to empty",
-        &render(s.distance_to_empty.as_ref()),
-        None,
-    );
+    status_card(ui, "Distance to empty", &render(to_empty), None);
 }

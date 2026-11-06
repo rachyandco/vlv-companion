@@ -200,6 +200,13 @@ pub struct Statistics {
     #[serde(rename = "tripMeter2")]
     pub trip_meter_2: Option<RNumber>,
     pub average_fuel_consumption: Option<RNumber>,
+    /// Field names Volvo actually sends for current cars (observed 2026-11-06
+    /// on an XC40 Recharge); the published spec lists only the five above.
+    pub trip_meter_manual: Option<RNumber>,
+    pub trip_meter_automatic: Option<RNumber>,
+    pub average_speed_automatic: Option<RNumber>,
+    pub average_energy_consumption: Option<RNumber>,
+    pub distance_to_empty_battery: Option<RNumber>,
 }
 
 /// Exterior warnings are an open-ended map of warning name to state.
