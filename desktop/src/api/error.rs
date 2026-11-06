@@ -14,10 +14,12 @@ pub enum ApiError {
     Network(String),
     #[error("session expired: {0}")]
     SessionExpired(String),
+    #[allow(dead_code)] // for the UI task
     #[error("not configured: {0}")]
     NotConfigured(String),
 }
 
+#[allow(dead_code)] // classification is read by the UI task
 #[derive(Debug, PartialEq)]
 pub enum ErrorKind {
     Session,
@@ -26,6 +28,7 @@ pub enum ErrorKind {
 }
 
 impl ApiError {
+    #[allow(dead_code)] // used by the UI task
     pub fn kind(&self) -> ErrorKind {
         match self {
             ApiError::Http { status: 401, .. } | ApiError::SessionExpired(_) => ErrorKind::Session,

@@ -9,6 +9,7 @@ use std::time::Duration;
 /// error or an early non-zero exit is reported as `false`; a child still
 /// running after the grace period is assumed to have succeeded and is left
 /// detached (it is reaped on a background thread).
+#[allow(dead_code)] // only `geo` uses it; the UI task calls `geo`
 fn launch(target: &str) -> bool {
     let Ok(mut child) = Command::new("xdg-open").arg(target).spawn() else {
         return false;
@@ -31,6 +32,7 @@ fn reap(mut child: Child) {
 }
 
 /// Open `geo:lat,lon`, falling back to an OpenStreetMap URL.
+#[allow(dead_code)] // for the UI task (must run off the UI thread)
 pub fn geo(lat: f64, lon: f64) -> io::Result<()> {
     if launch(&format!("geo:{lat},{lon}")) {
         return Ok(());

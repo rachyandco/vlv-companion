@@ -6,6 +6,7 @@ use directories::ProjectDirs;
 pub struct Paths {
     pub config_dir: PathBuf,
     pub state_dir: PathBuf,
+    #[allow(dead_code)] // map tile cache, used by the UI task
     pub cache_dir: PathBuf,
 }
 

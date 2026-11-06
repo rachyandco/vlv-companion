@@ -1,18 +1,13 @@
-#[allow(dead_code)] // used by later tasks
 mod api;
-#[allow(dead_code)] // used by later tasks
 mod auth;
-#[allow(dead_code)] // used by later tasks
 mod config;
 mod ipc;
-#[allow(dead_code)] // used by later tasks
 mod open;
-#[allow(dead_code)] // used by later tasks
 mod paths;
-#[allow(dead_code)] // used by later tasks
 mod state;
-#[allow(dead_code)] // remove once later tasks use the whole theme API
+#[allow(dead_code)] // remove once the UI task uses the whole theme API
 mod theme;
+mod worker;
 
 fn main() -> eframe::Result {
     let initial_callback = std::env::args().nth(1);
@@ -47,23 +42,34 @@ fn main() -> eframe::Result {
             .with_icon(icon),
         ..Default::default()
     };
+    let paths = paths::Paths::from_env();
+    let config = config::load_config(&paths);
+    let tokens = config::load_tokens(&paths);
+    // Without a listener the worker still gets a (never-firing) callback channel.
+    let callbacks = callbacks.unwrap_or_else(|| std::sync::mpsc::channel().1);
     eframe::run_native(
         "Vlv Companion",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
             theme::apply(&cc.egui_ctx);
+            let ctx = cc.egui_ctx.clone();
+            let (requests, events) = worker::spawn(paths, config, tokens, callbacks, move || {
+                ctx.request_repaint()
+            });
             Ok(Box::new(App {
                 initial_callback,
-                callbacks,
+                requests,
+                events,
             }))
         }),
     )
 }
 
-#[allow(dead_code)] // consumed by later tasks
+#[allow(dead_code)] // consumed by the UI task
 struct App {
     initial_callback: Option<String>,
-    callbacks: Option<std::sync::mpsc::Receiver<String>>,
+    requests: std::sync::mpsc::Sender<worker::messages::UiRequest>,
+    events: std::sync::mpsc::Receiver<worker::messages::WorkerEvent>,
 }
 
 impl eframe::App for App {

@@ -5,6 +5,9 @@ use serde::de::DeserializeOwned;
 
 use super::error::{from_response, ApiError};
 
+/// `ApiError::Http::code` for a 2xx response whose body is empty.
+pub const EMPTY_BODY: &str = "empty-body";
+
 pub struct VolvoClient {
     http: reqwest::Client,
     base: String,
@@ -66,8 +69,15 @@ impl VolvoClient {
             return Err(from_response(status.as_u16(), &reason, &text));
         }
         serde_json::from_str(&text).map_err(|e| ApiError::Http {
-            status: 200,
-            code: Some("decode".into()),
+            status: status.as_u16(),
+            code: Some(
+                if text.trim().is_empty() {
+                    EMPTY_BODY
+                } else {
+                    "decode"
+                }
+                .into(),
+            ),
             message: e.to_string(),
         })
     }

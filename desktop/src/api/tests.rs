@@ -76,3 +76,31 @@ async fn get_sets_headers_and_parses_error_envelope() {
         _ => panic!(),
     }
 }
+#[tokio::test]
+async fn empty_2xx_body_is_reported_as_empty_not_decode() {
+    let server = httpmock::MockServer::start();
+    server.mock(|w, t| {
+        w.method("POST").path("/empty");
+        t.status(200).body("");
+    });
+    server.mock(|w, t| {
+        w.method("POST").path("/garbage");
+        t.status(200).body("<html>");
+    });
+    let c = VolvoClient::new(reqwest::Client::new(), server.base_url(), "K".into());
+    let code = |e: ApiError| match e {
+        ApiError::Http { code, .. } => code,
+        other => panic!("{other:?}"),
+    };
+    let body = serde_json::json!({});
+    let e = c
+        .post_json::<serde_json::Value>("/empty", "T", &body)
+        .await
+        .unwrap_err();
+    assert_eq!(code(e).as_deref(), Some(super::client::EMPTY_BODY));
+    let e = c
+        .post_json::<serde_json::Value>("/garbage", "T", &body)
+        .await
+        .unwrap_err();
+    assert_eq!(code(e).as_deref(), Some("decode"));
+}

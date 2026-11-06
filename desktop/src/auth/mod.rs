@@ -8,6 +8,7 @@ pub const AUTHORIZE_URL: &str =
     "https://auth.volvocars.com/realms/volvocars/protocol/openid-connect/auth";
 pub const TOKEN_URL: &str =
     "https://auth.volvocars.com/realms/volvocars/protocol/openid-connect/token";
+#[allow(dead_code)] // not used yet: sign-out only drops local tokens
 pub const REVOKE_URL: &str =
     "https://auth.volvocars.com/realms/volvocars/protocol/openid-connect/revoke";
 
@@ -35,4 +36,6 @@ pub enum AuthError {
     Http(#[from] reqwest::Error),
     #[error("Unexpected response from the token endpoint: {0}")]
     BadResponse(String),
+    #[error("Start sign-in from this window, then return here.")]
+    NoPendingSignIn,
 }

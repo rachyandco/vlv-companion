@@ -94,6 +94,7 @@ impl Resource {
 /// One cached response, or the error string from the last failed fetch.
 #[derive(Debug)]
 pub struct Entry {
+    #[allow(dead_code)] // read by the UI task
     pub value: Result<serde_json::Value, String>,
     pub fetched_at: Instant,
 }

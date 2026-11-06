@@ -5,6 +5,7 @@ pub const CLIMATE_DURATION_MS: i64 = 30 * 60_000;
 
 /// True while a user-started climatisation is still expected to be running.
 /// A start time in the future (clock skew) is treated as inactive.
+#[allow(dead_code)] // used by the UI task
 pub fn is_active(started_at_ms: Option<i64>, now_ms: i64) -> bool {
     match started_at_ms {
         None => false,
@@ -13,6 +14,7 @@ pub fn is_active(started_at_ms: Option<i64>, now_ms: i64) -> bool {
 }
 
 /// Milliseconds left in the cycle, clamped to `[0, CLIMATE_DURATION_MS]`.
+#[allow(dead_code)] // used by the UI task
 pub fn remaining_ms(started_at_ms: Option<i64>, now_ms: i64) -> i64 {
     match started_at_ms {
         None => 0,
