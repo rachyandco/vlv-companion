@@ -2,12 +2,30 @@
 mod auth;
 #[allow(dead_code)] // used by later tasks
 mod config;
+mod ipc;
 #[allow(dead_code)] // used by later tasks
 mod paths;
 #[allow(dead_code)] // remove once later tasks use the whole theme API
 mod theme;
 
 fn main() -> eframe::Result {
+    let initial_callback = std::env::args().nth(1);
+    let sock = ipc::socket_path();
+    if let Some(url) = initial_callback
+        .as_deref()
+        .filter(|a| a.starts_with("volvo-companion://"))
+    {
+        if ipc::try_forward(&sock, url) {
+            return Ok(());
+        }
+    }
+    let callbacks = match ipc::Listener::bind(&sock) {
+        Ok(l) => Some(l.into_receiver()),
+        Err(e) => {
+            eprintln!("cannot listen on {}: {e}", sock.display());
+            None
+        }
+    };
     let icon = eframe::icon_data::from_png_bytes(include_bytes!("../packaging/icon-256.png"))
         .expect("bundled icon is a valid PNG");
     let options = eframe::NativeOptions {
@@ -24,12 +42,19 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| {
             theme::apply(&cc.egui_ctx);
-            Ok(Box::new(App))
+            Ok(Box::new(App {
+                initial_callback,
+                callbacks,
+            }))
         }),
     )
 }
 
-struct App;
+#[allow(dead_code)] // consumed by later tasks
+struct App {
+    initial_callback: Option<String>,
+    callbacks: Option<std::sync::mpsc::Receiver<String>>,
+}
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
