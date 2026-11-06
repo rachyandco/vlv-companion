@@ -58,13 +58,12 @@ pub fn show(ui: &mut Ui, state: &AppState) -> Option<SidebarAction> {
             }
         }
         let can_refresh = state.signed_in && state.session_expired.is_none();
-        if ui
-            .add_enabled(
-                can_refresh,
-                egui::Button::new("Refresh").min_size(wide.into()),
-            )
-            .clicked()
-        {
+        let refresh = ui
+            .add_enabled_ui(can_refresh, |ui| {
+                ui.add_sized(wide, egui::Button::new("Refresh"))
+            })
+            .inner;
+        if refresh.clicked() {
             action = Some(SidebarAction::Refresh);
         }
     });
