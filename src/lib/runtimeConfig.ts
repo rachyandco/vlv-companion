@@ -1,5 +1,6 @@
 import { DEFAULT_REDIRECT_URI, DEFAULT_SCOPES } from "@/auth/config";
 import { isLegacyClientId } from "@/auth/migration";
+import { upgradeDefaultScopes } from "@/lib/scopes";
 import {
   getRuntimeClientId,
   getRuntimeClientSecret,
@@ -63,6 +64,9 @@ export async function setRuntimeConfig(next: Partial<RuntimeConfig>): Promise<vo
  * caller can drop tokens that the new service would refuse to refresh.
  */
 export async function migrateRuntimeConfig(): Promise<{ legacyClient: boolean }> {
-  const storedClientId = await getRuntimeClientId();
+  const [storedClientId, storedScopes] = await Promise.all([getRuntimeClientId(), getRuntimeScopes()]);
+  const upgraded = upgradeDefaultScopes(storedScopes ?? "");
+  if (upgraded !== null) await setRuntimeScopes(upgraded);
   return { legacyClient: isLegacyClientId(storedClientId ?? "") };
 }
+

@@ -120,6 +120,13 @@ export type Statistics = {
   tripMeter1?: ResourceInstanceWithUnit<number>;
   tripMeter2?: ResourceInstanceWithUnit<number>;
   averageFuelConsumption?: ResourceInstanceWithUnit<number>;
+  // Field names Volvo actually sends for current (2024+) cars; the published
+  // spec still lists the five above. Observed 2026-11-06 on an XC40 Recharge.
+  tripMeterManual?: ResourceInstanceWithUnit<number>;
+  tripMeterAutomatic?: ResourceInstanceWithUnit<number>;
+  averageSpeedAutomatic?: ResourceInstanceWithUnit<number>;
+  averageEnergyConsumption?: ResourceInstanceWithUnit<number>;
+  distanceToEmptyBattery?: ResourceInstanceWithUnit<number>;
 };
 export type StatisticsResponse = { data: Statistics };
 

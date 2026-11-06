@@ -163,13 +163,19 @@ export default function OverviewScreen(): JSX.Element {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Trip</Text>
           <View style={styles.grid}>
-            <StatusTile label="Trip meter 1" value={renderResource(stats.tripMeter1)} />
-            <StatusTile label="Trip meter 2" value={renderResource(stats.tripMeter2)} />
+            <StatusTile label="Trip meter" value={renderResource(stats.tripMeterManual ?? stats.tripMeter1)} />
+            <StatusTile label="Trip meter (auto)" value={renderResource(stats.tripMeterAutomatic ?? stats.tripMeter2)} />
             <StatusTile label="Average speed" value={renderResource(stats.averageSpeed)} />
+            {stats.averageSpeedAutomatic ? (
+              <StatusTile label="Average speed (auto)" value={renderResource(stats.averageSpeedAutomatic)} />
+            ) : null}
+            {stats.averageEnergyConsumption ? (
+              <StatusTile label="Energy consumption" value={renderResource(stats.averageEnergyConsumption)} />
+            ) : null}
             {isEV ? null : (
               <StatusTile label="Fuel consumption" value={renderResource(stats.averageFuelConsumption)} />
             )}
-            <StatusTile label="Distance to empty" value={renderResource(stats.distanceToEmpty)} />
+            <StatusTile label="Distance to empty" value={renderResource(stats.distanceToEmptyBattery ?? stats.distanceToEmpty)} />
           </View>
         </View>
       ) : null}
