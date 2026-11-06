@@ -6,6 +6,8 @@ mod auth;
 mod config;
 mod ipc;
 #[allow(dead_code)] // used by later tasks
+mod open;
+#[allow(dead_code)] // used by later tasks
 mod paths;
 #[allow(dead_code)] // used by later tasks
 mod state;
