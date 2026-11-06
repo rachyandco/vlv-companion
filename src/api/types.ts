@@ -87,7 +87,7 @@ export type Windows = {
 };
 export type WindowsResponse = { data: Windows };
 
-export type ExteriorWarnings = {
+export type ExteriorWarnings = Record<string, ResourceInstanceString | undefined> & {
   brakeLightCenterWarning?: ResourceInstanceString;
   brakeLightLeftWarning?: ResourceInstanceString;
   brakeLightRightWarning?: ResourceInstanceString;
