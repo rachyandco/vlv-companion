@@ -1,6 +1,6 @@
 [package]
 name = "vlv-companion-desktop"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2021"
 description = "Linux desktop client for the Volvo Cars public API"
 license = "GPL-3.0-or-later"
