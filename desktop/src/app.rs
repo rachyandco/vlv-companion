@@ -156,12 +156,14 @@ impl App {
                 .or_default()
                 .apply(resource, value, Instant::now()),
             WorkerEvent::CommandResult {
+                vin,
                 command,
                 status,
                 message,
                 bucket,
                 ..
             } => {
+                self.dashboard.finish_command(Some(&vin), command);
                 let level = match bucket {
                     Bucket::Success | Bucket::Pending => Level::Info,
                     Bucket::UserActionable => Level::Warn,
@@ -171,6 +173,7 @@ impl App {
                 self.set_banner(level, format!("{}: {text}", command.label()));
             }
             WorkerEvent::CommandError { command, message } => {
+                self.dashboard.finish_command(None, command);
                 self.set_banner(Level::Danger, format!("{}: {message}", command.label()));
             }
             WorkerEvent::SessionExpired(msg) => {

@@ -28,6 +28,44 @@ pub struct DashboardState {
     car: Option<CarView>,
     /// VIN of an unlock waiting for the user's confirmation.
     confirm_unlock: Option<String>,
+    /// Lock or unlock sent and not answered yet: (VIN, command). While set,
+    /// the lock card ignores clicks, like the phone's `busy` flag.
+    pending: Option<(String, CommandName)>,
+}
+
+impl DashboardState {
+    /// Marks `command` as in flight for `vin`.
+    pub fn begin_command(&mut self, vin: &str, command: CommandName) {
+        self.pending = Some((vin.to_string(), command));
+    }
+
+    /// Clears the marker on the answer to `command`. `vin` is `None` for
+    /// worker errors, which do not carry one.
+    pub fn finish_command(&mut self, vin: Option<&str>, command: CommandName) {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|(v, c)| *c == command && vin.is_none_or(|x| x == v))
+        {
+            self.pending = None;
+        }
+    }
+
+    /// True while a lock or unlock for `vin` is in flight.
+    pub fn is_busy(&self, vin: &str) -> bool {
+        self.pending.as_ref().is_some_and(|(v, _)| v == vin)
+    }
+
+    /// Drops the pending marker and any open confirmation that belong to
+    /// another car than `vin` (the selection changed).
+    pub fn retain_vin(&mut self, vin: &str) {
+        if self.pending.as_ref().is_some_and(|(v, _)| v != vin) {
+            self.pending = None;
+        }
+        if self.confirm_unlock.as_deref().is_some_and(|v| v != vin) {
+            self.confirm_unlock = None;
+        }
+    }
 }
 
 /// Things the dashboard asks the app to do.
@@ -51,6 +89,7 @@ pub fn show(
     data: Option<&VehicleData>,
 ) -> Vec<DashboardAction> {
     let mut actions = Vec::new();
+    state.retain_vin(vin);
     let is_ev = cfg
         .vehicle_prefs
         .get(&vin.to_uppercase())
@@ -70,11 +109,13 @@ pub fn show(
         .as_ref()
         .and_then(|x| x.central_lock.as_ref())
         .map(|r| r.value.as_str());
+    let busy = state.is_busy(vin);
     wrapped_row(ui, |ui| {
-        if lock_card(ui, lock) {
+        if lock_card(ui, lock, busy) && !busy {
             if lock == Some("LOCKED") {
                 state.confirm_unlock = Some(vin.to_string());
             } else {
+                state.begin_command(vin, CommandName::Lock);
                 actions.push(DashboardAction::Command(CommandName::Lock, None));
             }
         }
@@ -85,14 +126,15 @@ pub fn show(
     middle_row(ui, state, d, is_ev);
     errors(ui, data);
 
-    // A pending confirmation is dropped when another car is selected.
-    if state.confirm_unlock.as_deref().is_some_and(|v| v != vin) {
+    // A refresh showed the car is no longer locked: nothing to unlock.
+    if lock != Some("LOCKED") {
         state.confirm_unlock = None;
     }
     if state.confirm_unlock.is_some() {
         if let Some(confirmed) = confirm_unlock(ui.ctx()) {
             state.confirm_unlock = None;
             if confirmed {
+                state.begin_command(vin, CommandName::Unlock);
                 actions.push(DashboardAction::Command(CommandName::Unlock, None));
             }
         }
@@ -362,35 +404,70 @@ fn errors(ui: &mut Ui, data: Option<&VehicleData>) {
     }
 }
 
-/// The phone's unlock confirmation. `Some(true)` on Unlock, `Some(false)` on
-/// Cancel, `None` while undecided.
+/// The phone's unlock confirmation as a modal (the dashboard behind is
+/// dimmed and blocked). `Some(true)` on Unlock, `Some(false)` on Cancel,
+/// Escape or a click outside, `None` while undecided.
 fn confirm_unlock(ctx: &egui::Context) -> Option<bool> {
     let mut answer = None;
-    egui::Window::new("Unlock car")
-        .collapsible(false)
-        .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-        .show(ctx, |ui| {
-            ui.label("After confirming, pull a door handle within the unlock window to open it.");
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.button("Cancel").clicked() {
-                    answer = Some(false);
-                }
-                if ui
-                    .button(RichText::new("Unlock").color(Colors::RED))
-                    .clicked()
-                {
-                    answer = Some(true);
-                }
-            });
+    let modal = egui::Modal::new(egui::Id::unique("confirm_unlock")).show(ctx, |ui| {
+        ui.set_max_width(360.0);
+        ui.label(RichText::new("Unlock car").size(18.0).strong());
+        ui.add_space(6.0);
+        ui.label("After confirming, pull a door handle within the unlock window to open it.");
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            if ui.button("Cancel").clicked() {
+                answer = Some(false);
+            }
+            if ui
+                .button(RichText::new("Unlock").color(Colors::RED))
+                .clicked()
+            {
+                answer = Some(true);
+            }
         });
+    });
+    if answer.is_none() && modal.should_close() {
+        answer = Some(false);
+    }
     answer
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_command_marker() {
+        let mut s = DashboardState::default();
+        assert!(!s.is_busy("A"));
+        s.begin_command("A", CommandName::Lock);
+        assert!(s.is_busy("A"));
+        assert!(!s.is_busy("B"));
+        // Answers for another car or command leave it set.
+        s.finish_command(Some("B"), CommandName::Lock);
+        s.finish_command(Some("A"), CommandName::Unlock);
+        s.finish_command(None, CommandName::Honk);
+        assert!(s.is_busy("A"));
+        s.finish_command(Some("A"), CommandName::Lock);
+        assert!(!s.is_busy("A"));
+        // Errors carry no VIN and match on the command.
+        s.begin_command("A", CommandName::Unlock);
+        s.finish_command(None, CommandName::Unlock);
+        assert!(!s.is_busy("A"));
+    }
+
+    #[test]
+    fn selecting_another_car_drops_pending_state() {
+        let mut s = DashboardState::default();
+        s.begin_command("A", CommandName::Lock);
+        s.confirm_unlock = Some("A".into());
+        s.retain_vin("A");
+        assert!(s.is_busy("A") && s.confirm_unlock.is_some());
+        s.retain_vin("B");
+        assert!(!s.is_busy("A") && !s.is_busy("B"));
+        assert!(s.confirm_unlock.is_none());
+    }
 
     #[test]
     fn tyre_levels_follow_the_phone_rules() {
