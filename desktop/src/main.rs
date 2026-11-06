@@ -1,4 +1,6 @@
 #[allow(dead_code)] // used by later tasks
+mod api;
+#[allow(dead_code)] // used by later tasks
 mod auth;
 #[allow(dead_code)] // used by later tasks
 mod config;
