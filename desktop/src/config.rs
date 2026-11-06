@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::paths::Paths;
 
-const DEFAULT_REDIRECT: &str = "https://volvo.roussel-zeter.eu/redirect/";
-const DEFAULT_SCOPES: [&str; 24] = [
+pub const DEFAULT_REDIRECT: &str = "https://volvo.roussel-zeter.eu/redirect/";
+pub const DEFAULT_SCOPES: [&str; 24] = [
     "openid",
     "conve:vehicle_relation",
     "conve:fuel_status",

@@ -1,12 +1,13 @@
 mod api;
+mod app;
 mod auth;
 mod config;
 mod ipc;
 mod open;
 mod paths;
 mod state;
-#[allow(dead_code)] // remove once the UI task uses the whole theme API
 mod theme;
+mod ui;
 mod worker;
 
 fn main() -> eframe::Result {
@@ -53,29 +54,16 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             theme::apply(&cc.egui_ctx);
             let ctx = cc.egui_ctx.clone();
+            let ui_config = config.clone();
             let (requests, events) = worker::spawn(paths, config, tokens, callbacks, move || {
                 ctx.request_repaint()
             });
-            Ok(Box::new(App {
-                initial_callback,
+            Ok(Box::new(app::App::new(
+                ui_config,
                 requests,
                 events,
-            }))
+                initial_callback,
+            )))
         }),
     )
-}
-
-#[allow(dead_code)] // consumed by the UI task
-struct App {
-    initial_callback: Option<String>,
-    requests: std::sync::mpsc::Sender<worker::messages::UiRequest>,
-    events: std::sync::mpsc::Receiver<worker::messages::WorkerEvent>,
-}
-
-impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        ui.centered_and_justified(|ui| {
-            ui.label(egui::RichText::new("Vlv Companion").size(28.0));
-        });
-    }
 }

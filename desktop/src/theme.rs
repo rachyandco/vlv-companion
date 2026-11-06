@@ -20,6 +20,7 @@ impl Colors {
     /// rgb(64,128,255) at 50 % alpha (premultiplied).
     pub const ACCENT_BORDER: Color32 = Color32::from_rgba_premultiplied(32, 64, 128, 128);
     pub const ACCENT_TEXT: Color32 = Color32::from_rgb(0xcf, 0xe0, 0xff);
+    #[allow(dead_code)] // used by the dashboard tasks
     pub const GREEN: Color32 = Color32::from_rgb(0x34, 0xd3, 0x99);
     pub const AMBER: Color32 = Color32::from_rgb(0xf5, 0x9e, 0x0b);
     pub const RED: Color32 = Color32::from_rgb(0xef, 0x44, 0x44);
