@@ -1,7 +1,7 @@
 import { Image, StyleSheet, View, Text } from "react-native";
 import Svg, { Rect } from "react-native-svg";
 
-import type { Doors, ResourceInstanceString } from "@/api/types";
+import type { Doors, ResourceInstanceString, Windows } from "@/api/types";
 
 const OPEN_STATES = new Set(["OPEN", "AJAR"]);
 
@@ -17,6 +17,7 @@ function fill(open: boolean | undefined): string {
 
 type Props = {
   doors?: Doors;
+  windows?: Windows;
   /** Total width in px; height auto-derived from image aspect ratio. */
   width?: number;
   /** When true, hide the fuel-tank-lid indicator (no tank on a BEV). */
@@ -28,7 +29,7 @@ const IMG = require("../../assets/volvo-top-black.png");
 // Image native size: 588 × 1030 (aspect 0.5709)
 const ASPECT = 1030 / 588;
 
-export function CarTopView({ doors, width = 260, isEV }: Props): JSX.Element {
+export function CarTopView({ doors, windows, width = 260, isEV }: Props): JSX.Element {
   const height = Math.round(width * ASPECT);
   const lock = doors?.centralLock?.value;
 
@@ -51,6 +52,14 @@ export function CarTopView({ doors, width = 260, isEV }: Props): JSX.Element {
           <Rect x={20} y={510} width={120} height={155} rx={18} fill={fill(isOpen(doors?.rearLeftDoor))} />
           {/* Rear-right door */}
           <Rect x={448} y={510} width={120} height={155} rx={18} fill={fill(isOpen(doors?.rearRightDoor))} />
+          {/* Window overlays (drawn over the doors) */}
+          <Rect x={40} y={370} width={80} height={100} rx={12} fill={fill(isOpen(windows?.frontLeftWindow))} />
+          <Rect x={468} y={370} width={80} height={100} fill={fill(isOpen(windows?.frontRightWindow))} />
+          <Rect x={40} y={525} width={80} height={110} fill={fill(isOpen(windows?.rearLeftWindow))} />
+          <Rect x={468} y={525} width={80} height={110} fill={fill(isOpen(windows?.rearRightWindow))} />
+          {windows?.sunroof ? (
+            <Rect x={190} y={330} width={208} height={120} rx={20} fill={fill(isOpen(windows.sunroof))} />
+          ) : null}
           {/* Tank lid (left side on this car) — hidden on EVs */}
           {isEV ? null : (
             <Rect x={20} y={695} width={108} height={70} rx={10} fill={fill(isOpen(doors?.tankLid))} />
