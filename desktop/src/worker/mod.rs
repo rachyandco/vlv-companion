@@ -171,7 +171,9 @@ impl Worker {
 
     async fn run(mut self, mut rx: mpsc::UnboundedReceiver<Msg>) {
         if self.session.tokens.is_some() {
-            // Keeps the session alive straight away and loads the vehicles.
+            // Tell the UI its state even when the network is down, then keep
+            // the session alive straight away and load the vehicles.
+            self.emit(WorkerEvent::SignedIn);
             self.keepalive().await;
             self.load_garage().await;
         }
@@ -193,6 +195,8 @@ impl Worker {
 
     fn flush_expired_notice(&mut self) {
         if let Some(msg) = self.session.take_expired_notice() {
+            // After a re-sign-in the next tick refetches everything.
+            self.caches.clear();
             self.emit(WorkerEvent::SessionExpired(msg));
         }
     }
@@ -352,7 +356,7 @@ impl Worker {
         }
         let token = match self.session.access_token().await {
             Ok(t) => t,
-            Err(e) => return self.note(&Err::<(), _>(e)),
+            Err(e) => return self.fail_resources(vin, due, e),
         };
         let unauthorised = self.fetch_batch(vin, due, token).await;
         if unauthorised.is_empty() {
@@ -365,7 +369,34 @@ impl Worker {
                         .expire("Your Volvo session was rejected by the API. Sign in again.");
                 }
             }
-            Err(e) => self.note(&Err::<(), _>(e)),
+            Err(e) => self.fail_resources(vin, unauthorised, e),
+        }
+    }
+
+    /// Reports resources that could not be fetched at all, so every due
+    /// resource ends with a `Resource` event, and caches the error so the
+    /// next tick retries them. Skipped on `SessionExpired`, which already
+    /// produces its own event.
+    fn fail_resources(&mut self, vin: &str, list: Vec<Resource>, e: ApiError) {
+        if let ApiError::Network(_) = e {
+            self.set_offline(true);
+        }
+        if matches!(e, ApiError::SessionExpired(_)) {
+            return;
+        }
+        let message = api_message(&e);
+        let now = Instant::now();
+        for resource in list {
+            self.caches.entry(vin.to_string()).or_default().put(
+                resource,
+                Err(message.clone()),
+                now,
+            );
+            self.emit(WorkerEvent::Resource {
+                vin: vin.to_string(),
+                resource,
+                value: Err(message.clone()),
+            });
         }
     }
 
@@ -492,5 +523,66 @@ impl Worker {
         };
         self.session.persist_tokens();
         self.emit(event);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn forced_refresh_with_unreachable_token_endpoint_fails_every_resource() {
+        // A closed port: connecting to it is refused.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let base = format!("http://127.0.0.1:{port}");
+        let dir = tempfile::tempdir().unwrap();
+        let tokens = Tokens {
+            access_token: "OLD".into(),
+            refresh_token: Some("R".into()),
+            expires_at_unix: chrono::Utc::now().timestamp() - 10,
+            ..Tokens::default()
+        };
+        let session = Session::new(
+            Paths::in_dir(dir.path()),
+            Config {
+                client_id: "vid-dcr-x".into(),
+                ..Config::default()
+            },
+            Some(tokens),
+            base.clone(),
+            format!("{base}/token"),
+        );
+        let (ev_tx, ev_rx) = std_mpsc::channel();
+        let (msg_tx, _msg_rx) = mpsc::unbounded_channel();
+        let mut w = Worker::new(session, ev_tx, Box::new(|| {}), msg_tx);
+
+        w.refresh("V", true).await;
+
+        let resources: Vec<_> = ev_rx
+            .try_iter()
+            .filter_map(|e| match e {
+                WorkerEvent::Resource {
+                    vin,
+                    resource,
+                    value,
+                } => Some((vin, resource, value)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(resources.len(), Resource::ALL.len());
+        for r in Resource::ALL {
+            assert_eq!(resources.iter().filter(|(_, x, _)| *x == r).count(), 1);
+        }
+        assert!(resources
+            .iter()
+            .all(|(v, _, value)| v == "V" && value.is_err()));
+        // The session survives a network failure and the errors are cached for retry.
+        assert!(w.session.signed_in());
+        assert!(w.caches["V"].entries.values().all(|e| e.value.is_err()));
+        assert_eq!(w.caches["V"].entries.len(), Resource::ALL.len());
     }
 }
