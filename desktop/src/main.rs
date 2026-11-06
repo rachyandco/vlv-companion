@@ -2,12 +2,15 @@ mod api;
 mod app;
 mod auth;
 mod config;
+#[cfg(debug_assertions)]
+mod demo;
 mod ipc;
 mod open;
 mod paths;
 mod state;
 mod theme;
 mod ui;
+mod warnings;
 mod worker;
 
 fn main() -> eframe::Result {

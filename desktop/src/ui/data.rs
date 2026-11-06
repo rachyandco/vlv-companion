@@ -39,6 +39,8 @@ pub struct VehicleData {
     pub updated_at: HashMap<Resource, Instant>,
     /// Time of the newest successful fetch of any resource.
     pub last_updated: Option<Instant>,
+    /// Wall-clock time of that fetch, for the header's "updated hh:mm".
+    pub last_updated_wall: Option<chrono::DateTime<chrono::Local>>,
 }
 
 impl VehicleData {
@@ -55,6 +57,7 @@ impl VehicleData {
                 self.errors.remove(&resource);
                 self.updated_at.insert(resource, now);
                 self.last_updated = Some(self.last_updated.map_or(now, |t| t.max(now)));
+                self.last_updated_wall = Some(chrono::Local::now());
             }
             Err(e) => {
                 self.errors.insert(resource, e);
@@ -132,6 +135,7 @@ mod tests {
         assert_eq!(doors.tailgate.as_ref().unwrap().value, "OPEN");
         assert_eq!(d.updated_at.get(&Resource::Doors), Some(&now));
         assert_eq!(d.last_updated, Some(now));
+        assert!(d.last_updated_wall.is_some());
         assert!(d.errors.is_empty());
     }
 

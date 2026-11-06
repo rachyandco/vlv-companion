@@ -23,6 +23,8 @@ use crate::worker::messages::{UiRequest, WorkerEvent};
 const ACTIVITY_RESEND: Duration = Duration::from_secs(10);
 const TICK: Duration = Duration::from_secs(1);
 const CONTENT_WIDTH: f32 = 720.0;
+/// The dashboard lays cards side by side, so it gets a wider column.
+const DASHBOARD_WIDTH: f32 = 1100.0;
 const CALLBACK_SCHEME: &str = "volvo-companion://";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,7 +67,8 @@ impl App {
         rx: Receiver<WorkerEvent>,
         initial_callback: Option<String>,
     ) -> App {
-        App {
+        #[allow(unused_mut)] // only the debug demo mutates it
+        let mut app = App {
             tx,
             rx,
             sign_in_form: SignInForm::from_config(&config),
@@ -89,7 +92,12 @@ impl App {
                 minimised: false,
             },
             activity_sent: None,
+        };
+        #[cfg(debug_assertions)]
+        if crate::demo::enabled() {
+            crate::demo::seed(&mut app.state);
         }
+        app
     }
 
     fn send(&self, req: UiRequest) {
@@ -217,7 +225,8 @@ impl App {
             )
         });
         let now = Instant::now();
-        if input {
+        // Pointer motion counts at most once a second.
+        if input && now.duration_since(self.activity.last_input) >= Duration::from_secs(1) {
             self.activity.last_input = now;
         }
         self.activity.focused = focused;
@@ -320,7 +329,14 @@ impl App {
         }
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
-            .show(ui, |ui| centred_column(ui, |ui| self.screen_contents(ui)));
+            .show(ui, |ui| {
+                let width = if self.state.signed_in && self.screen == Screen::Dashboard {
+                    DASHBOARD_WIDTH
+                } else {
+                    CONTENT_WIDTH
+                };
+                centred_column(ui, width, |ui| self.screen_contents(ui))
+            });
     }
 
     fn screen_contents(&mut self, ui: &mut Ui) {
@@ -356,21 +372,42 @@ impl App {
         };
         let label = vehicle_label(&self.state.config, &self.state.vehicles, &vin);
         let data = self.state.vehicles.get(&vin);
-        for action in dashboard::show(ui, &mut self.dashboard, &label, data) {
-            self.on_dashboard(action);
+        let actions = dashboard::show(
+            ui,
+            &mut self.dashboard,
+            &self.state.config,
+            &vin,
+            &label,
+            data,
+        );
+        for action in actions {
+            self.on_dashboard(&vin, action);
         }
     }
 
-    /// `DashboardAction` gains variants in the dashboard tasks.
-    fn on_dashboard(&mut self, action: DashboardAction) {
-        match action {}
+    fn on_dashboard(&mut self, vin: &str, action: DashboardAction) {
+        match action {
+            DashboardAction::Command(command, runtime_minutes) => {
+                self.send(UiRequest::Command {
+                    vin: vin.to_string(),
+                    command,
+                    runtime_minutes,
+                });
+            }
+            // Wired to the map in Task 12.
+            DashboardAction::RefreshLocation
+            | DashboardAction::ToggleChargers
+            | DashboardAction::OpenInMaps(..)
+            | DashboardAction::OpenStation(..)
+            | DashboardAction::SetTileTemplate(_) => {}
+        }
     }
 }
 
-/// Lays `add` out in a column at most `CONTENT_WIDTH` wide, centred.
-fn centred_column(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
+/// Lays `add` out in a column at most `max_width` wide, centred.
+fn centred_column(ui: &mut Ui, max_width: f32, add: impl FnOnce(&mut Ui)) {
     let avail = ui.available_width();
-    let width = avail.min(CONTENT_WIDTH);
+    let width = avail.min(max_width);
     ui.horizontal(|ui| {
         ui.add_space(((avail - width) / 2.0).max(0.0));
         ui.vertical(|ui| {

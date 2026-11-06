@@ -4,6 +4,8 @@ use std::collections::HashMap;
 
 use crate::config::Config;
 
+pub mod car_view;
+pub mod cards;
 pub mod dashboard;
 pub mod data;
 pub mod settings;
