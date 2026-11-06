@@ -133,6 +133,8 @@ The workflow installs JDK 17 + Android SDK 35 + NDK 27.1, runs `pnpm install`, `
 - `GET  /energy/v2/vehicles/{vin}/{state,capabilities}`
 - `GET  /location/v1/vehicles/{vin}/location`
 
+Every read endpoint of the three APIs is covered; the deprecated Energy v1 `recharge-status` is intentionally skipped.
+
 ## Security notes
 
 - The OAuth client_id is *not* a secret — it is shipped with the APK and protected by PKCE on the code exchange.
