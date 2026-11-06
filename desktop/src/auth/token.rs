@@ -161,7 +161,9 @@ mod tests {
                 .path("/token")
                 .header("authorization", "Basic aWQ6c2VjcmV0")
                 .body_contains("grant_type=authorization_code")
-                .body_contains("code_verifier=v1");
+                .body_contains("code_verifier=v1")
+                .body_contains("code=c")
+                .body_contains("redirect_uri=https%3A%2F%2Fr%2F");
             t.status(200).json_body(
                 serde_json::json!({"access_token":"A","refresh_token":"R","expires_in":300}),
             );
@@ -185,7 +187,9 @@ mod tests {
     async fn exchange_error_body_is_surfaced() {
         let server = httpmock::MockServer::start();
         server.mock(|w, t| {
-            w.method("POST").path("/token");
+            w.method("POST")
+                .path("/token")
+                .body_contains("client_id=id");
             t.status(400).json_body(
                 serde_json::json!({"error":"invalid_grant","error_description":"Code not valid"}),
             );
@@ -200,5 +204,46 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(e.to_string(), "invalid_grant: Code not valid");
+    }
+
+    fn fake_jwt(payload: &str) -> String {
+        format!("h.{}.s", URL_SAFE_NO_PAD.encode(payload))
+    }
+
+    async fn exchange_with_id_token(id_token: String) -> Result<Tokens, AuthError> {
+        let server = httpmock::MockServer::start();
+        server.mock(|w, t| {
+            w.method("POST").path("/token");
+            t.status(200).json_body(serde_json::json!({
+                "access_token":"A","expires_in":300,"id_token":id_token
+            }));
+        });
+        let ep = TokenEndpoint {
+            token_url: server.url("/token"),
+            client_id: "id".into(),
+            client_secret: Some("s".into()),
+        };
+        ep.exchange_code(&reqwest::Client::new(), "c", "v", "https://r/", "n")
+            .await
+    }
+
+    #[tokio::test]
+    async fn mismatched_nonce_is_rejected() {
+        let r = exchange_with_id_token(fake_jwt(r#"{"nonce":"other"}"#)).await;
+        assert!(matches!(r, Err(AuthError::NonceMismatch)));
+    }
+
+    #[tokio::test]
+    async fn id_token_without_nonce_is_accepted() {
+        assert!(exchange_with_id_token(fake_jwt(r#"{"sub":"x"}"#))
+            .await
+            .is_ok());
+    }
+
+    #[test]
+    fn read_jwt_claim_rejects_malformed_tokens() {
+        assert_eq!(read_jwt_claim("abc", "nonce"), None);
+        assert_eq!(read_jwt_claim("a.!!!.c", "nonce"), None);
+        assert_eq!(read_jwt_claim(&fake_jwt("[1,2]"), "nonce"), None);
     }
 }

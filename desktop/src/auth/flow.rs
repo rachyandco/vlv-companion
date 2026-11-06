@@ -57,14 +57,14 @@ pub fn parse_callback(url: &str, pending: &PendingSignIn) -> Result<String, Auth
             .find(|(key, _)| key == k)
             .map(|(_, v)| v.into_owned())
     };
+    if get("state").as_deref() != Some(pending.state.as_str()) {
+        return Err(AuthError::StateMismatch);
+    }
     if let Some(error) = get("error") {
         return Err(AuthError::OAuth {
             error,
             description: get("error_description"),
         });
-    }
-    if get("state").as_deref() != Some(pending.state.as_str()) {
-        return Err(AuthError::StateMismatch);
     }
     get("code")
         .filter(|c| !c.is_empty())
@@ -104,6 +104,13 @@ mod tests {
         assert_eq!(q["prompt"], "login");
         assert!(q["scope"].starts_with("openid conve:vehicle_relation"));
         assert!(!q["scope"].contains("offline_access"));
+        assert_eq!(
+            q["redirect_uri"],
+            "https://volvo.roussel-zeter.eu/redirect/"
+        );
+        assert_eq!(pending.redirect_uri, q["redirect_uri"]);
+        assert!(!pending.state.is_empty());
+        assert_ne!(pending.state, pending.nonce);
     }
 
     #[test]
