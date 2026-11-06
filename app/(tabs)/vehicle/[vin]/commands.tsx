@@ -3,18 +3,22 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 
 import { CommandButton } from "@/components/CommandButton";
 import { UnlockReadyBanner } from "@/components/UnlockReadyBanner";
-import { useCommandAccessibility } from "@/hooks/useVehicle";
+import { useCommandAccessibility, useCommandList } from "@/hooks/useVehicle";
 import { useInvokeCommand } from "@/hooks/useInvokeCommand";
 import { useVehiclePrefs } from "@/hooks/useVehiclePrefs";
 import { useVin } from "@/hooks/useVin";
 import { climateRemainingMs, isClimateActive, useClimateStore } from "@/state/climate";
-import { bucketOf, friendlyMessage } from "@/api/commands";
+import { bucketOf, friendlyMessage, supportedCommands } from "@/api/commands";
 import type { CommandName, InvokeUnlock } from "@/api/types";
 
 export default function CommandsScreen(): JSX.Element {
   const vin = useVin();
   const { isEV } = useVehiclePrefs(vin);
   const access = useCommandAccessibility(vin);
+  const commandList = useCommandList(vin);
+  const supported = supportedCommands(commandList.data?.data);
+  const unsupported = (c: CommandName) => supported.size > 0 && !supported.has(c);
+  const labelFor = (c: CommandName, text: string) => (unsupported(c) ? `${text} — not supported by this car` : text);
   const invoke = useInvokeCommand();
   const [unlockUntil, setUnlockUntil] = useState<number | null>(null);
   const [engineRuntime, setEngineRuntime] = useState(5);
@@ -33,10 +37,9 @@ export default function CommandsScreen(): JSX.Element {
     return () => clearTimeout(t);
   }, [unlockUntil]);
 
-  // Volvo's /commands endpoint returns names in UPPER_SNAKE_CASE
-  // (`HONK_AND_FLASH`) that don't 1:1 map to our kebab-case POST paths
-  // (`honk-flash`). Skip the gating and let the API's `NOT_SUPPORTED`
-  // invokeStatus drive the user-facing toast.
+  // Buttons for commands missing from the car's /commands list are disabled and
+  // labelled as unsupported. An empty list (not loaded yet, or none returned)
+  // leaves every button enabled so the API's own status still drives the toast.
 
   const reachable = access.data?.data.availabilityStatus?.value;
   const unreachableReason = access.data?.data.availabilityStatus?.unavailableReason;
@@ -128,29 +131,29 @@ export default function CommandsScreen(): JSX.Element {
         ) : null}
 
         <Section title="Locking">
-          <CommandButton label="Lock" onPress={() => run("lock")} disabled={!isAvailable} />
+          <CommandButton label={labelFor("lock", "Lock")} onPress={() => run("lock")} disabled={!isAvailable || unsupported("lock")} />
           <CommandButton
-            label="Lock (reduced guard)"
+            label={labelFor("lock-reduced-guard", "Lock (reduced guard)")}
             confirm={{
               title: "Reduced-guard lock",
               message: "Locks without arming the interior motion sensor. Use when leaving a pet or item inside.",
             }}
-            onPress={() => run("lock-reduced-guard")} disabled={!isAvailable}
+            onPress={() => run("lock-reduced-guard")} disabled={!isAvailable || unsupported("lock-reduced-guard")}
            
           />
           <CommandButton
-            label="Unlock"
+            label={labelFor("unlock", "Unlock")}
             confirm={{ title: "Unlock car", message: "After confirming, pull the door handle within the unlock window." }}
             variant="danger"
-            onPress={() => run("unlock")} disabled={!isAvailable}
+            onPress={() => run("unlock")} disabled={!isAvailable || unsupported("unlock")}
            
           />
         </Section>
 
         <Section title="Find my car">
-          <CommandButton label="Honk" onPress={() => run("honk")} disabled={!isAvailable} />
-          <CommandButton label="Flash" onPress={() => run("flash")} disabled={!isAvailable} />
-          <CommandButton label="Honk and flash" onPress={() => run("honk-flash")} disabled={!isAvailable} />
+          <CommandButton label={labelFor("honk", "Honk")} onPress={() => run("honk")} disabled={!isAvailable || unsupported("honk")} />
+          <CommandButton label={labelFor("flash", "Flash")} onPress={() => run("flash")} disabled={!isAvailable || unsupported("flash")} />
+          <CommandButton label={labelFor("honk-flash", "Honk and flash")} onPress={() => run("honk-flash")} disabled={!isAvailable || unsupported("honk-flash")} />
         </Section>
 
         <Section title="Climate">
@@ -167,12 +170,12 @@ export default function CommandsScreen(): JSX.Element {
             </View>
           ) : null}
           <CommandButton
-            label="Start climatisation"
-            onPress={() => run("climatization-start")} disabled={!isAvailable}
+            label={labelFor("climatization-start", "Start climatisation")}
+            onPress={() => run("climatization-start")} disabled={!isAvailable || unsupported("climatization-start")}
           />
           <CommandButton
-            label="Stop climatisation"
-            onPress={() => run("climatization-stop")} disabled={!isAvailable || !climateOn}
+            label={labelFor("climatization-stop", "Stop climatisation")}
+            onPress={() => run("climatization-stop")} disabled={!isAvailable || !climateOn || unsupported("climatization-stop")}
           />
         </Section>
 
@@ -180,19 +183,19 @@ export default function CommandsScreen(): JSX.Element {
           <Section title="Engine">
             <RuntimePicker minutes={engineRuntime} onChange={setEngineRuntime} />
             <CommandButton
-              label={`Start engine (${engineRuntime} min)`}
+              label={labelFor("engine-start", `Start engine (${engineRuntime} min)`)}
               confirm={{
                 title: "Start engine",
                 message: `Run the engine for ${engineRuntime} minutes. Make sure the car is in a ventilated area.`,
               }}
               variant="danger"
               onPress={() => run("engine-start", { runtimeMinutes: engineRuntime })}
-              disabled={!isAvailable}
+              disabled={!isAvailable || unsupported("engine-start")}
             />
             <CommandButton
-              label="Stop engine"
+              label={labelFor("engine-stop", "Stop engine")}
               onPress={() => run("engine-stop")}
-              disabled={!isAvailable}
+              disabled={!isAvailable || unsupported("engine-stop")}
             />
           </Section>
         )}
