@@ -42,3 +42,6 @@ assets = [
   ["packaging/vlv-companion.desktop", "usr/share/applications/", "644"],
   ["packaging/icon-256.png", "usr/share/icons/hicolor/256x256/apps/vlv-companion.png", "644"],
 ]
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,3 +1,7 @@
+#[allow(dead_code)] // used by later tasks
+mod config;
+#[allow(dead_code)] // used by later tasks
+mod paths;
 #[allow(dead_code)] // remove once later tasks use the whole theme API
 mod theme;
 
