@@ -29,3 +29,5 @@ Thumbs.db
 
 expo-env.d.ts
 # @end expo-cli
+
+.superpowers/
